@@ -79,10 +79,28 @@ export function npmPlugin(): esbuild.Plugin {
           const lines = args.path.slice("radix:".length).split(",").map((n) => `export * as ${n} from ${JSON.stringify(esmUrl(`@radix-ui/react-${kebab(n)}`))};`);
           return { contents: lines.join("\n"), loader: "js" };
         }
-        return { contents: await esmModule(args.path), loader: "js" };
+        const source = await esmModule(args.path);
+        // A package's stylesheet can come back as plain CSS even under a .css.mjs name (react-tweet's theme does).
+        if (/\.css(\.m?js)?(\?|$)/.test(args.path) && !/^\s*(\/\*[\s\S]*?\*\/\s*)*(import|export|var|let|const|function)\b/.test(source)) {
+          return { contents: source, loader: "css" };
+        }
+        return { contents: zod4Entry(args.path, source) ?? source, loader: "js" };
       });
     },
   };
+}
+
+/**
+ * esm.sh's builds of zod 4's entry points ("zod" and "zod/v4") export only `default` and `z`, so
+ * named imports such as `{ object, string }` fail to bundle. zod/v4/classic/external defines every
+ * name, so the entry point is rebuilt from it: everything it exports, plus `z` and the default.
+ */
+function zod4Entry(url: string, source: string): string | null {
+  if (!/\/zod@[^/?]+(\/v4)?(\?|$)/.test(url)) return null;
+  const version = source.match(/^\/\* esm\.sh - zod@(\d+)([\d.]*)/)?.slice(1).join("");
+  if (!version || Number(version.split(".")[0]) < 4) return null;
+  const external = JSON.stringify(`${ESM}/zod@${version}/v4/classic/external?target=es2022`);
+  return `export * from ${external};\nimport * as z from ${external};\nexport { z };\nexport default z;`;
 }
 
 /** Named imports of `spec` in `code`, or null if it's imported whole (default or namespace). */

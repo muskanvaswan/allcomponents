@@ -19,7 +19,7 @@ import type { Component, ComponentStyles, Library } from "./types";
 // inline script and stylesheet. It's served from /preview/* and shown in a
 // sandboxed iframe, so third-party code never runs with this app's origin.
 
-const VERSION = "preview:v22";
+const VERSION = "preview:v23";
 const SHADCN_BASE = "https://ui.shadcn.com/r/styles/new-york-v4";
 const EXTS = ["", ".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js"];
 
@@ -51,6 +51,8 @@ class SourceGraph {
   private byBase = new Map<string, string>();
   private aliases = new Map<string, string>();
   deps = new Map<string, string>();
+  /** The component's own registry item URL, so imports of its siblings (`@/registry/magicui/x`) can be fetched. */
+  itemUrl: string | null = null;
 
   constructor(private library: Library) {}
 
@@ -82,6 +84,16 @@ class SourceGraph {
     this.addDeps(item.dependencies);
   }
 
+  /** The first candidate path that exists in the library's GitHub repo, fetched and added. */
+  private async fromRepo(candidates: string[]): Promise<string | null> {
+    const repo = this.library.repo;
+    if (!repo) return null;
+    const tree = new Set(await repoTree(repo));
+    const hit = candidates.map(clean).find((c) => tree.has(c));
+    const content = hit ? await fetchRaw(rawGithubUrl(repo, hit)) : null;
+    return hit && content != null ? this.add(hit, content) : null;
+  }
+
   private lookup(candidates: string[]): string | null {
     for (const c of candidates) {
       const p = clean(c);
@@ -98,26 +110,43 @@ class SourceGraph {
     else {
       const rest = spec.replace(/^(@|~|#|\$lib)\//, "");
       bases = [rest, `src/${rest}`, `app/${rest}`];
+      // In a monorepo, `@/` means the importing app's own folder, like apps/v4/ in shadcn/ui's repo.
+      const app = importer?.match(/^((?:apps|packages)\/[^/]+)\//)?.[1];
+      if (app) bases.push(`${app}/${rest}`, `${app}/src/${rest}`);
     }
     const candidates = bases.flatMap((b) => EXTS.map((e) => b + e));
     const found = this.lookup(candidates);
     if (found) return found;
 
+    // A demo from inside a monorepo app imports that app's own copies of the components, which can differ from the
+    // registry's (shadcn/ui's per-style bases), so those come from the repo before any same-named file here.
+    if (importer && /^(apps|packages)\//.test(importer)) {
+      const own = await this.fromRepo(candidates);
+      if (own) return own;
+    }
+
     const last = norm(stripExt(spec.split("/").pop()!));
     if (last !== "index" && this.byBase.has(last)) return this.byBase.get(last)!;
 
-    const repo = this.library.repo;
-    if (repo) {
-      const tree = new Set(await repoTree(repo));
-      const hit = candidates.map(clean).find((c) => tree.has(c));
-      if (hit) {
-        const content = await fetchRaw(rawGithubUrl(repo, hit));
-        if (content != null) return this.add(hit, content);
+    const own = await this.fromRepo(candidates);
+    if (own) return own;
+
+    // Another item from the component's own registry, like Magic UI's `@/registry/magicui/tweet-card`.
+    const sibling = this.itemUrl && /^(@|~)\/registry\//.test(spec) ? spec.split("/").pop()! : null;
+    if (sibling && /^[a-z0-9-]+$/.test(sibling)) {
+      const url = this.itemUrl!.replace(/[^/]+?(\.json)?$/, (m) => sibling + (m.endsWith(".json") ? ".json" : ""));
+      const item = await fetchJson<RegistryItem>(url);
+      const first = item?.files?.find((f) => typeof f === "object" && f.content);
+      if (item && first && typeof first === "object") {
+        this.addItem(item);
+        this.aliases.set(stripExt(clean(spec.replace(/^(@|~)\//, ""))), clean(first.path));
+        return clean(first.path);
       }
     }
 
-    // shadcn/ui primitives (`@/components/ui/button`, `@/hooks/use-mobile`) come from the official registry.
-    const base = spec.match(/(?:components\/ui|registry\/[\w-]+\/ui|hooks)\/([\w-]+)$/)?.[1];
+    // shadcn/ui primitives (`@/components/ui/button`, `@/hooks/use-mobile`) come from the official registry, as do
+    // the per-style copies its own demos import (`@/styles/radix-nova/ui/card`, `@/registry/bases/radix/ui/card`).
+    const base = spec.match(/(?:components\/ui|registry\/[\w-]+\/ui|registry\/bases\/[\w-]+\/ui|styles\/[\w-]+\/ui|hooks)\/([\w-]+)$/)?.[1];
     if (base) {
       const item = await fetchJson<RegistryItem>(`${SHADCN_BASE}/${base}.json`);
       if (item?.files?.length) {
@@ -224,10 +253,12 @@ function pick(m, preferred) {
 }
 const entry = pick(Mod, __PREFERRED__);
 const main = pick(Main, __PREFERRED_MAIN__);
+// A bare component often needs the provider its module ships beside it (Sidebar and SidebarProvider).
+const providerOf = (m, C) => { const name = Object.keys(m).find((k) => m[k] === C); return name && isComp(m[name + "Provider"]) ? m[name + "Provider"] : null; };
 const attempts = [];
-if (entry) attempts.push([entry, {}]);
-if (main && main !== entry) attempts.push([main, {}]);
-if (main || entry) attempts.push([main || entry, { children: "Preview" }]);
+if (entry) attempts.push([entry, {}, providerOf(Mod, entry)]);
+if (main && main !== entry) attempts.push([main, {}, providerOf(Main, main)]);
+if (main || entry) attempts.push([main || entry, { children: "Preview" }, main ? providerOf(Main, main) : providerOf(Mod, entry)]);
 class Boundary extends React.Component {
   constructor(p) { super(p); this.state = { error: null, attempt: 0 }; }
   static getDerivedStateFromError(error) { return { error }; }
@@ -236,9 +267,15 @@ class Boundary extends React.Component {
     else report("error", error);
   }
   render() {
-    if (this.state.error && this.state.attempt >= attempts.length - 1) return React.createElement("div", { className: "__preview-error" }, "This preview crashed (" + String(this.state.error.message || this.state.error) + "). The original page shows it in action.");
-    const [C, props] = attempts[this.state.attempt];
-    const el = React.createElement(C, props);
+    if (this.state.error) {
+      // Render nothing until componentDidCatch moves on: rendering the attempt that just failed would only
+      // throw again, past this boundary, and skip the fallbacks.
+      if (this.state.attempt < attempts.length - 1) return null;
+      return React.createElement("div", { className: "__preview-error" }, "This preview crashed (" + String(this.state.error.message || this.state.error) + "). The original page shows it in action.");
+    }
+    const [C, props, Provider] = attempts[this.state.attempt];
+    let el = React.createElement(C, props);
+    if (Provider) el = React.createElement(Provider, null, el);
     return Providers.TooltipProvider ? React.createElement(Providers.TooltipProvider, null, el) : el;
   }
 }
@@ -257,8 +294,12 @@ else {
   const ready = () => { if (!sent) { sent = true; report("ready"); } };
   requestAnimationFrame(() => requestAnimationFrame(ready));
   setTimeout(ready, 150);
-  // Some parts render nothing on their own (a provider, a form context); say so rather than show an empty box.
-  setTimeout(() => { if (!document.getElementById("root").childElementCount) report("error", "This component renders nothing on its own"); }, 1500);
+  // Some parts render nothing on their own (a provider, a form context, an empty list); say so rather than show an empty box.
+  setTimeout(() => {
+    const root = document.getElementById("root");
+    const shows = root.textContent.trim() || [...root.querySelectorAll("*")].some((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+    if (!shows) report("error", "This component renders nothing on its own");
+  }, 1500);
 }`;
 
 // Sets the preview's theme before it paints. Opened on its own it follows
@@ -327,7 +368,13 @@ const kebab = (s: string) => s.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCas
  * from real imports: names the main component exports come from it, anything
  * else is looked up among the library's other components.
  */
-async function rewriteLookup(source: string, lookup: { statement: string; binding: string }, mainCode: string, graph: SourceGraph): Promise<string | null> {
+async function rewriteLookup(
+  source: string,
+  lookup: { statement: string; binding: string },
+  mainCode: string,
+  graph: SourceGraph,
+  examplePath: string,
+): Promise<string | null> {
   const names = new Set<string>();
   for (const m of source.matchAll(new RegExp(`const\\s*\\{([^}]*)\\}\\s*=\\s*${lookup.binding}\\b`, "g"))) {
     for (const part of m[1].split(",")) {
@@ -339,14 +386,32 @@ async function rewriteLookup(source: string, lookup: { statement: string; bindin
   const imports = [`import * as __main from "__component__";`];
   const entries: string[] = [];
   let i = 0;
+  // The lookup table itself, fetched from the repo only if a name isn't in the component or its ui folder.
+  let table: { path: string; code: string } | null | undefined;
+  const tableEntry = async (name: string) => {
+    if (table === undefined) {
+      const spec = lookup.statement.match(/from\s*["']([^"']+)["']/)?.[1];
+      const tablePath = spec ? await graph.resolve(spec, examplePath) : null;
+      table = tablePath ? { path: tablePath, code: graph.files.get(tablePath) ?? "" } : null;
+    }
+    // An entry like `Chat: lazyNamed(() => import("../sections/Showcase"), "ChatShowcase")` or `Chat: lazy(() => import("../ui/Chat"))`.
+    const m = table?.code.match(new RegExp(`\\b${name}\\s*:\\s*[\\w.]+\\(\\s*\\(\\)\\s*=>\\s*import\\(\\s*["']([^"']+)["']\\s*\\)(?:\\s*,\\s*["'](\\w+)["'])?`));
+    const file = table && m ? await graph.resolve(m[1], table.path) : null;
+    return file ? { file, exportName: m![2] ?? name } : null;
+  };
   for (const name of names) {
     if (named.has(name)) entries.push(`${name}: __main.${name}`);
     else if (name === defaultName) entries.push(`${name}: __main.default`);
     else {
       const path = (await graph.resolve(`@/components/ui/${name}`, null)) ?? (await graph.resolve(`@/components/ui/${kebab(name)}`, null));
+      const listed = path ? null : await tableEntry(name);
       if (path) {
         imports.push(`import * as __dep${i} from "__path__:${path}";`);
         entries.push(`${name}: __dep${i}.${name} ?? __dep${i}.default`);
+        i++;
+      } else if (listed) {
+        imports.push(`import * as __dep${i} from "__path__:${listed.file}";`);
+        entries.push(`${name}: __dep${i}[${JSON.stringify(listed.exportName)}] ?? __dep${i}.default`);
         i++;
       } else return null;
     }
@@ -395,6 +460,7 @@ async function repoAssets(library: Library) {
 async function bundleReact(c: Component, library: Library): Promise<PreviewResult> {
   const assets = await repoAssets(library);
   const graph = new SourceGraph(library);
+  graph.itemUrl = c.itemUrl;
   graph.addDeps(c.dependencies);
   const mainFiles = c.files.filter((f) => f.content && /\.(tsx|jsx|ts|js|css)$/.test(f.path));
   if (!mainFiles.some((f) => /\.(tsx|jsx|js)$/.test(f.path))) return { ok: false, html: errorHtml("No source code is available for a live preview."), error: "no-source" };
@@ -421,7 +487,7 @@ async function bundleReact(c: Component, library: Library): Promise<PreviewResul
   let exampleSource = exampleFile?.content;
   const lookup = exampleSource ? registryLookup(exampleSource) : null;
   if (lookup && exampleSource) {
-    exampleSource = (await rewriteLookup(exampleSource, lookup, mainComponent.content ?? "", graph)) ?? undefined;
+    exampleSource = (await rewriteLookup(exampleSource, lookup, mainComponent.content ?? "", graph, exampleFile!.path)) ?? undefined;
     // A demo that needs components we can't find is worse than no demo.
     if (!exampleSource) exampleFile = undefined;
   }

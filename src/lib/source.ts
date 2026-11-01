@@ -83,6 +83,10 @@ async function findRepoDemo(repo: RepoRef, c: Component): Promise<ExampleRef | n
     return names.has(b);
   });
   if (!candidates.length) return null;
+  // shadcn/ui keeps a copy of each demo per primitive library (examples/radix, examples/base, examples/aria).
+  // Its registry components are built on Radix, so the Radix copy is the one whose imports match.
+  const flavour = (p: string) => (/\/radix\//.test(p) ? 0 : /\/(aria|base|bases)\//.test(p) ? 2 : 1);
+  candidates.sort((a, b) => flavour(a) - flavour(b));
 
   const fetched = await mapLimit(candidates.slice(0, 4), 4, async (path) => ({ path, content: await fetchRaw(rawGithubUrl(repo, path)) }));
   const fileBases = c.files.map((f) => baseName(f.path).toLowerCase());
