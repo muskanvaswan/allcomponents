@@ -1,26 +1,206 @@
 @import "tailwindcss";
 
+/* Lookbook design system (Apple design language): design-system/lookbook/MASTER.md */
+
+/* The theme comes from <html data-theme>, set before paint from the viewer's
+   choice or their system setting (src/lib/theme.ts). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Applies when the viewer has hidden the filters sidebar: <html data-sidebar="closed">, set before paint (src/lib/sidebar.ts). */
+@custom-variant sidebar-closed (&:where([data-sidebar="closed"] *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --paper: #f5f5f7;
+  --surface: #ffffff;
+  --ink: #1d1d1f;
+  --muted: #6e6e73;
+  --line: rgb(0 0 0 / 0.08);
+  --fill: rgb(118 118 128 / 0.12);
+  --fill-strong: rgb(118 118 128 / 0.2);
+  --accent: #d6e6ff;
+  --accent-hover: #c7d9f5;
+  /* The accent is already pale, so its tint keeps most of its strength to show on paper. */
+  --accent-soft: rgb(214 230 255 / 0.75);
+  --on-accent: #1d1d1f;
+  --danger: #d70015;
+  --ok: #248a3d;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.05);
+  --shadow-raised: 0 2px 6px rgb(0 0 0 / 0.05), 0 14px 36px rgb(0 0 0 / 0.1);
+  --scrollbar: rgb(0 0 0 / 0.2);
+  --scrollbar-hover: rgb(0 0 0 / 0.38);
+  --dot: rgb(40 80 150 / 0.16);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #000000;
+  --surface: #1c1c1e;
+  --ink: #f5f5f7;
+  --muted: #98989d;
+  --line: rgb(255 255 255 / 0.1);
+  --fill: rgb(118 118 128 / 0.24);
+  --fill-strong: rgb(118 118 128 / 0.36);
+  --accent: #d6e6ff;
+  --accent-hover: #e5f3ff;
+  --accent-soft: rgb(214 230 255 / 0.16);
+  --danger: #ff6961;
+  --ok: #30d158;
+  --shadow-card: 0 0 0 1px rgb(255 255 255 / 0.06);
+  --shadow-raised: 0 0 0 1px rgb(255 255 255 / 0.1), 0 14px 36px rgb(0 0 0 / 0.5);
+  --scrollbar: rgb(255 255 255 / 0.2);
+  --scrollbar-hover: rgb(255 255 255 / 0.38);
+  --dot: rgb(214 230 255 / 0.13);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-fill: var(--fill);
+  --color-fill-strong: var(--fill-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-danger: var(--danger);
+  --color-ok: var(--ok);
+  --shadow-card: var(--shadow-card);
+  --shadow-raised: var(--shadow-raised);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-inter), "Helvetica Neue", system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", var(--font-inter), "Helvetica Neue", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", var(--font-jetbrains), Menlo, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Blueprint paper: a fine grid of faint blue-grey dots that scrolls with the page. */
+html {
+  background: radial-gradient(circle, var(--dot) 1px, transparent 1.5px) 0 0 / 22px 22px, var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  letter-spacing: -0.006em;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* The pointer is a cartoon hand everywhere, like a games-console menu, and turns
+   blue over anything you can click (public/cursors, drawn for this site). The
+   hotspot is the fingertip. Text fields keep their text cursor. */
+html {
+  cursor: url("/cursors/hand.svg") 11 2, auto;
+}
+a,
+button,
+label,
+summary,
+select,
+[role="button"],
+[role="option"],
+input[type="checkbox"],
+input[type="radio"] {
+  cursor: url("/cursors/hand-hover.svg") 11 2, pointer;
+}
+:disabled {
+  cursor: url("/cursors/hand.svg") 11 2, not-allowed;
+}
+input:not([type="checkbox"], [type="radio"]),
+textarea,
+[contenteditable="true"] {
+  cursor: text;
+}
+
+/* Scrollbars: no track, and a translucent pill that only shows while its area
+   scrolls (data-scrolling, set by src/lib/scrollbars.ts) or under the pointer. */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  /* The transparent border insets the pill from the edge. */
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: transparent padding-box;
+}
+[data-scrolling]::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar);
+}
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-hover);
+}
+/* Firefox has no ::-webkit-scrollbar; the standard properties get it close. */
+@supports not selector(::-webkit-scrollbar) {
+  :root {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  [data-scrolling] {
+    scrollbar-color: var(--scrollbar) transparent;
+  }
+}
+
+/* In the base layer so a utility like focus:outline-none can replace it (text fields draw their own focus glow). */
+@layer base {
+  :focus-visible {
+    /* Mostly ink: the pale accent alone wouldn't stand out against white surfaces. */
+    outline: 3px solid color-mix(in srgb, var(--accent) 40%, var(--ink));
+    outline-offset: 2px;
+  }
+}
+
+/* Inline links: ink text with an accent underline. */
+.ink-link {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 150ms;
+}
+.ink-link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Shiki emits both themes; pick the one matching the page. */
+.shiki,
+.shiki span {
+  background-color: transparent !important;
+}
+[data-theme="dark"] .shiki,
+[data-theme="dark"] .shiki span {
+  color: var(--shiki-dark) !important;
+}
+
+/* Loading: a slow, faint ripple that rolls across the grid along its diagonals,
+   like a Wii menu settling in. Each tile's swell comes a beat after the tile
+   above or to its left, so at any moment each diagonal is just a shade lighter
+   than the one before it. --i is the tile's place in the grid and --cols the
+   grid's column count (set by TileGrid), so row + column is its diagonal. */
+@keyframes tile-wave {
+  0%, 60%, 100% { opacity: 0; }
+  30% { opacity: 1; }
+}
+
+.tile-wave {
+  --row: round(down, calc(var(--i, 0) / var(--cols, 1)), 1);
+  --col: mod(var(--i, 0), var(--cols, 1));
+  background: color-mix(in oklab, var(--ink) 3%, transparent);
+  opacity: 0;
+  animation: tile-wave 2.6s ease-in-out infinite;
+  animation-delay: calc((var(--row) + var(--col)) * 160ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile-wave { animation: none; }
+  * { transition-duration: 0ms !important; }
 }

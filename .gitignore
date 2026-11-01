@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local component database; only the deploy snapshot (npm run snapshot) is committed
+/data/*
+!/data/snapshot.db

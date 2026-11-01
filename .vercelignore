@@ -1,0 +1,9 @@
+# Uploads from the Vercel CLI: the read-only snapshot of the database (npm run snapshot)
+# goes up, the working copy and local build output don't.
+/data/*
+!/data/snapshot.db
+/.next/
+/node_modules/
+/.claude/
+.env*
+*.tsbuildinfo

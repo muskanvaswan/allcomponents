@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- The pointer over something clickable: the same hand, outlined in blue with a pale blue tint. Hotspot (11, 2). -->
+  <defs>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0.6" dy="1.2" stdDeviation="0.9" flood-color="#1e3a6e" flood-opacity="0.35" />
+    </filter>
+    <g id="hand">
+      <rect x="8.6" y="2.2" width="5.2" height="16" rx="2.6" />
+      <rect x="13.4" y="10" width="4.8" height="9.5" rx="2.4" />
+      <rect x="17.6" y="11.2" width="4.6" height="9" rx="2.3" />
+      <rect x="21.6" y="13" width="4.2" height="8" rx="2.1" />
+      <rect x="8.6" y="14.5" width="17.2" height="14.5" rx="6.2" />
+      <rect x="3.2" y="15.4" width="9.6" height="4.8" rx="2.4" transform="rotate(38 8 17.8)" />
+    </g>
+  </defs>
+  <g filter="url(#shadow)">
+    <use href="#hand" fill="#3d6fc4" stroke="#3d6fc4" stroke-width="2.6" stroke-linejoin="round" />
+    <use href="#hand" fill="#eef4ff" />
+    <path d="M13.6 11.6v5.6M17.8 12.6v5.4M21.8 14.4v4.8" stroke="#b9cdee" stroke-width="1.1" stroke-linecap="round" fill="none" />
+  </g>
+</svg>
