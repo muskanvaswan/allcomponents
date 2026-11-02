@@ -8,7 +8,21 @@ export const SITE_TITLE = `${SITE_NAME}: a UI component aggregator`;
 
 /** For search results and link previews: under 160 characters, so it isn't cut off. */
 export const SITE_DESCRIPTION =
-  "An aggregator of UI components: browse components from many UI libraries in one place, sorted by category, with live previews and links to the originals.";
+  "An aggregator of React and Tailwind UI components from shadcn/ui, Magic UI and more, sorted by category, with live previews and install commands.";
+
+/** What people search for when they're after a site like this, for search engines that still read keywords. */
+export const SITE_KEYWORDS = [
+  "UI components",
+  "UI component aggregator",
+  "React components",
+  "Tailwind CSS components",
+  "shadcn/ui",
+  "shadcn registry",
+  "Magic UI",
+  "component library",
+  "animated components",
+  "copy and paste components",
+];
 
 /**
  * The site's public address. Set SITE_URL to the domain it's served from; on

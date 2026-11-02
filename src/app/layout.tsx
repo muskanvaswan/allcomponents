@@ -4,7 +4,7 @@ import { SoundEffects } from "@/components/sound";
 import { PREVIEW_BRIDGE_SCRIPT } from "@/lib/preview-bridge";
 import { SCROLLBAR_SCRIPT } from "@/lib/scrollbars";
 import { SIDEBAR_SCRIPT } from "@/lib/sidebar";
-import { SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/site";
+import { SITE_DESCRIPTION, SITE_KEYWORDS, SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/site";
 import { THEME_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
@@ -23,6 +23,11 @@ export const metadata: Metadata = {
   title: { default: SITE_TITLE, template: `%s · ${SITE_NAME}` },
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,
+  keywords: SITE_KEYWORDS,
+  category: "technology",
+  // Search results may show the share image large and the description in full.
+  robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 } },
+  appleWebApp: { title: SITE_NAME },
   openGraph: { type: "website", siteName: SITE_NAME, title: SITE_TITLE, description: SITE_DESCRIPTION, url: "/", locale: "en_US" },
   twitter: { card: "summary_large_image", title: SITE_TITLE, description: SITE_DESCRIPTION },
 };
