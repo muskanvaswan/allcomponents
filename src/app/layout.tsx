@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Fira_Code, JetBrains_Mono, Manrope, Newsreader, Unbounded } from "next/font/google";
 import { SoundEffects } from "@/components/sound";
 import { PREVIEW_BRIDGE_SCRIPT } from "@/lib/preview-bridge";
 import { SCROLLBAR_SCRIPT } from "@/lib/scrollbars";
@@ -8,9 +8,14 @@ import { SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/site";
 import { THEME_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
-// Apple devices render SF Pro from the system stack; Inter stands in elsewhere.
-const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
+// Manrope for text and Unbounded, light, for headings (chosen 2026-11-02 from a picker of options).
+const manrope = Manrope({ variable: "--font-manrope", subsets: ["latin"] });
+const unbounded = Unbounded({ variable: "--font-unbounded", subsets: ["latin"] });
 const mono = JetBrains_Mono({ variable: "--font-jetbrains", subsets: ["latin"] });
+// The toolbar's "add the skill" chip's face.
+const fira = Fira_Code({ variable: "--font-fira", subsets: ["latin"] });
+// The italic serif "All" in the home page's heading.
+const serif = Newsreader({ variable: "--font-newsreader", style: "italic", subsets: ["latin"] });
 
 // Each page sets its own title and canonical address; these are the defaults beneath them.
 export const metadata: Metadata = {
@@ -34,7 +39,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     // THEME_SCRIPT and SIDEBAR_SCRIPT set data-theme and data-sidebar on <html> before hydration.
-    <html lang="en" className={`${inter.variable} ${mono.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${manrope.variable} ${unbounded.variable} ${mono.variable} ${fira.variable} ${serif.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: SIDEBAR_SCRIPT }} />

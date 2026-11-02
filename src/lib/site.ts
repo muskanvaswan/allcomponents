@@ -18,5 +18,17 @@ export const SITE_URL =
   process.env.SITE_URL ??
   (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : `http://localhost:${process.env.PORT ?? 3000}`);
 
+/** The order libraries are listed in everywhere, by slug. Libraries not named here follow, newest first. */
+export const LIBRARY_ORDER = ["easyui", "rare-ui", "pin-ui", "magicui", "boardui", "ui-shadcn"];
+
+/** A library's place in LIBRARY_ORDER, for sorting; libraries not named there all share the last place. */
+export const libraryRank = (slug: string) => (LIBRARY_ORDER.includes(slug) ? LIBRARY_ORDER.indexOf(slug) : LIBRARY_ORDER.length);
+
+/**
+ * Installs the agent skill that has coding agents look here for a component before writing one, and show the
+ * alternatives when several fit. The site serves it at /skill (src/app/skill/route.ts).
+ */
+export const SKILL_INSTALL = `npx skills add ${SITE_URL}/skill`;
+
 /** Structured data for search engines, as a script tag's contents. `<` is escaped so text can't close the tag. */
 export const jsonLd = (data: object) => JSON.stringify({ "@context": "https://schema.org", ...data }).replace(/</g, "\\u003c");

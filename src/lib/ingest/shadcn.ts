@@ -307,7 +307,33 @@ export async function extractRegistry(
     repo: repo ?? undefined,
     components,
     warnings,
+    themeCss: template ? await registryStyles(registry, template) : undefined,
   };
+}
+
+const cssPath = (f: NonNullable<RegistryItem["files"]>[number]) => (typeof f === "string" ? f : f.path).endsWith(".css");
+
+/**
+ * A registry's own stylesheets: items like Board UI's `theme`, `typography` and `globals`, whose CSS defines the
+ * tokens its components' classes use (`bg-primary`, `text-display-sm`). They're returned in dependency order with
+ * their @import lines removed, ready to add to a preview's Tailwind input.
+ */
+async function registryStyles(registry: Registry, template: string): Promise<string | undefined> {
+  const items = registry.items
+    .filter((i) => i.files?.length && i.files.every(cssPath) && /^registry:(style|theme|lib|file)$/.test(i.type ?? ""))
+    .slice(0, 8);
+  if (!items.length) return undefined;
+  const names = new Set(items.map((i) => i.name));
+  // Stylesheets that build on the others (globals imports theme and typography) go last.
+  items.sort((a, b) => (a.registryDependencies ?? []).filter((d) => names.has(d)).length - (b.registryDependencies ?? []).filter((d) => names.has(d)).length);
+  const css: string[] = [];
+  for (const i of items) {
+    const full = await fetchJson<RegistryItem>(fill(template, i.name));
+    for (const f of full?.files ?? []) {
+      if (typeof f === "object" && f.content && cssPath(f)) css.push(f.content.replace(/^\s*@(import|plugin|source|reference)\b[^;]*;[ \t]*$/gm, ""));
+    }
+  }
+  return css.join("\n") || undefined;
 }
 
 const ACRONYMS = new Set(["ai", "ui", "cta", "faq", "otp", "kpi", "svg", "css", "url", "api", "pdf", "qr", "os"]);

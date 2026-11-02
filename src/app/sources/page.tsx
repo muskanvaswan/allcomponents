@@ -32,7 +32,7 @@ export default function SourcesPage() {
             All Components
           </Link>
         </nav>
-        <h1 className="font-display text-[34px] leading-tight font-bold tracking-[-0.025em] sm:text-[40px]">{TITLE}</h1>
+        <h1 className="font-display text-[34px] leading-tight font-light tracking-[-0.025em] sm:text-[40px]">{TITLE}</h1>
         <p className="mt-4 max-w-[62ch] text-[17px] leading-relaxed text-muted">
           {SITE_NAME} aggregates components from these UI libraries. Libraries that publish a shadcn registry come in with their full source, so every component gets a
           live preview. For other sites, it reads the docs pages and links each component back to its original page.

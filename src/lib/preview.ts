@@ -1,7 +1,7 @@
 import "server-only";
 import path from "node:path/posix";
 import * as esbuild from "esbuild";
-import { getPreview, READ_ONLY, savePreview } from "./db";
+import { getAsset, getPreview, libraryDependencies, READ_ONLY, savePreview } from "./db";
 import { fetchJson } from "./ingest/fetch";
 import { rawGithubUrl } from "./ingest/links";
 import type { RegistryItem } from "./ingest/shadcn";
@@ -72,7 +72,8 @@ class SourceGraph {
   addDeps(deps: string[] | undefined) {
     for (const d of deps ?? []) {
       const m = d.match(/^(@[^/@]+\/[^@]+|[^@]+)(?:@(.+))?$/);
-      if (m && !this.deps.has(m[1])) this.deps.set(m[1], m[2] ?? "");
+      // The first version seen wins, but a version beats none.
+      if (m && (!this.deps.has(m[1]) || (!this.deps.get(m[1]) && m[2]))) this.deps.set(m[1], m[2] ?? "");
     }
   }
 
@@ -82,6 +83,12 @@ class SourceGraph {
       this.add(f.path, f.content, [f.target, namePrefix && `${namePrefix}/${item.name}`]);
     }
     this.addDeps(item.dependencies);
+  }
+
+  /** Where the component's own registry serves the item `name`, if the component came from a registry. */
+  ownItemUrl(name: string): string | null {
+    if (!this.itemUrl || !/^[a-z0-9-]+$/.test(name)) return null;
+    return this.itemUrl.replace(/[^/]+?(\.json)?$/, (m) => name + (m.endsWith(".json") ? ".json" : ""));
   }
 
   /** The first candidate path that exists in the library's GitHub repo, fetched and added. */
@@ -128,21 +135,24 @@ class SourceGraph {
     const last = norm(stripExt(spec.split("/").pop()!));
     if (last !== "index" && this.byBase.has(last)) return this.byBase.get(last)!;
 
-    const own = await this.fromRepo(candidates);
-    if (own) return own;
-
-    // Another item from the component's own registry, like Magic UI's `@/registry/magicui/tweet-card`.
-    const sibling = this.itemUrl && /^(@|~)\/registry\//.test(spec) ? spec.split("/").pop()! : null;
-    if (sibling && /^[a-z0-9-]+$/.test(sibling)) {
-      const url = this.itemUrl!.replace(/[^/]+?(\.json)?$/, (m) => sibling + (m.endsWith(".json") ? ".json" : ""));
-      const item = await fetchJson<RegistryItem>(url);
+    // Another item from the component's own registry, named by the import's last segment: Magic UI's
+    // `@/registry/magicui/tweet-card`, or Board UI's `@/components/base/input/input` and `@/utils/cx`. It comes
+    // before the repo, whose copy can be ahead of or behind what the registry publishes.
+    const sibling = /^(@|~)\//.test(spec) ? this.ownItemUrl(spec.split("/").pop()!) : null;
+    if (sibling) {
+      const item = await fetchJson<RegistryItem>(sibling);
       const first = item?.files?.find((f) => typeof f === "object" && f.content);
       if (item && first && typeof first === "object") {
         this.addItem(item);
-        this.aliases.set(stripExt(clean(spec.replace(/^(@|~)\//, ""))), clean(first.path));
-        return clean(first.path);
+        // The item may hold several files (Board UI's `input` has hint-text, label and input); the one the import names, if it's there.
+        const target = this.lookup(candidates) ?? clean(first.path);
+        this.aliases.set(stripExt(clean(spec.replace(/^(@|~)\//, ""))), target);
+        return target;
       }
     }
+
+    const own = await this.fromRepo(candidates);
+    if (own) return own;
 
     // shadcn/ui primitives (`@/components/ui/button`, `@/hooks/use-mobile`) come from the official registry, as do
     // the per-style copies its own demos import (`@/styles/radix-nova/ui/card`, `@/registry/bases/radix/ui/card`).
@@ -462,16 +472,20 @@ async function bundleReact(c: Component, library: Library): Promise<PreviewResul
   const graph = new SourceGraph(library);
   graph.itemUrl = c.itemUrl;
   graph.addDeps(c.dependencies);
+  // A package the component imports without declaring it gets the version its library uses elsewhere
+  // (Board UI's app-shell imports @tanstack/react-table, which its data-table pins to ^8).
+  graph.addDeps(libraryDependencies(library.id));
   const mainFiles = c.files.filter((f) => f.content && /\.(tsx|jsx|ts|js|css)$/.test(f.path));
   if (!mainFiles.some((f) => /\.(tsx|jsx|js)$/.test(f.path))) return { ok: false, html: errorHtml("No source code is available for a live preview."), error: "no-source" };
   for (const f of c.files) if (f.content) graph.add(f.path, f.content, [f.target, `components/${c.librarySlug}/${c.slug}`, `components/ui/${c.slug}`]);
 
-  // Registry dependencies such as `@magicui/marquee`, a full item URL, or a shadcn primitive name.
+  // Registry dependencies: a full item URL, `@magicui/marquee`, or a bare name, which means the library's own
+  // item when its registry has one (Board UI's `button`, `cx`) and otherwise a shadcn/ui primitive.
   await Promise.all(
-    c.registryDependencies.slice(0, 10).map(async (dep) => {
+    c.registryDependencies.slice(0, 12).map(async (dep) => {
       const name = dep.replace(/\.json$/, "").split("/").pop()!;
-      const url = /^https?:/.test(dep) ? dep : dep.startsWith("@") && c.itemUrl ? c.itemUrl.replace(/[^/]+(\.json)?$/, (m) => name + (m.endsWith(".json") ? ".json" : "")) : `${SHADCN_BASE}/${name}.json`;
-      const item = await fetchJson<RegistryItem>(url);
+      const own = /^https?:/.test(dep) ? dep : graph.ownItemUrl(name);
+      const item = (own ? await fetchJson<RegistryItem>(own) : null) ?? (dep.startsWith("@") || /^https?:/.test(dep) ? null : await fetchJson<RegistryItem>(`${SHADCN_BASE}/${name}.json`));
       if (item) graph.addItem(item, "components");
     }),
   );
@@ -573,7 +587,8 @@ async function bundleReact(c: Component, library: Library): Promise<PreviewResul
       target: "es2022",
       jsx: "automatic",
       logLevel: "silent",
-      minify: true,
+      // PREVIEW_MINIFY=0 builds readable previews, for debugging one that crashes.
+      minify: process.env.PREVIEW_MINIFY !== "0",
       absWorkingDir: process.cwd(),
       define: { "process.env.NODE_ENV": '"production"' },
       plugins: [plugin, npmPlugin()],
@@ -590,7 +605,12 @@ async function bundleReact(c: Component, library: Library): Promise<PreviewResul
   const sources = [...graph.files].map(([p, content]) => ({ path: p, content }));
   const allCode = sources.map((f) => f.content).join("\n");
   const needsTwAnimate = /\banimate-(in|out)\b|\bfade-(in|out)-|\bzoom-(in|out)-|slide-in-from/.test(allCode) || graph.deps.has("tw-animate-css") || graph.deps.has("tailwindcss-animate");
-  const tailwindCss = await compileTailwind(sources, [THEME_CSS, stylesToCss(c.styles), needsTwAnimate ? await twAnimateCss() : ""].join("\n"));
+  // The library's own theme (saved when it was indexed) follows the shadcn/ui defaults, so its tokens win. If it
+  // won't compile here, the preview goes ahead without it.
+  const libraryTheme = getAsset(`theme:${library.id}`)?.content ?? "";
+  const twAnimate = needsTwAnimate ? await twAnimateCss() : "";
+  const tailwindInput = (theme: string) => [THEME_CSS, theme, stylesToCss(c.styles), twAnimate].join("\n");
+  const tailwindCss = await compileTailwind(sources, tailwindInput(libraryTheme)).catch((e) => (libraryTheme ? compileTailwind(sources, tailwindInput("")) : Promise.reject(e)));
   const html = documentHtml({
     css: `${tailwindCss}\n${css}`,
     head: cssLinks.map((href) => `<link rel="stylesheet" href="${href}">`).join("\n"),

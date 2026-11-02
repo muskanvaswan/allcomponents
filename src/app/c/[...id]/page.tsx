@@ -113,7 +113,7 @@ async function ComponentDetail({ params }: Pick<PageProps<"/c/[...id]">, "params
 
       <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-5">
         <div className="min-w-0 max-w-[70ch]">
-          <h1 className="font-display text-[34px] leading-tight font-bold tracking-[-0.025em] sm:text-[44px]">{c.name}</h1>
+          <h1 className="font-display text-[34px] leading-tight font-light tracking-[-0.025em] sm:text-[44px]">{c.name}</h1>
           {c.description && <p className="mt-3 text-[17px] leading-relaxed text-muted">{c.description}</p>}
           <div className="mt-4 flex flex-wrap items-center gap-2 text-[13px]">
             <Link href={`/?library=${c.librarySlug}`} className="rounded-full bg-fill px-3 py-1 font-medium transition-colors hover:bg-fill-strong">
@@ -145,7 +145,7 @@ async function ComponentDetail({ params }: Pick<PageProps<"/c/[...id]">, "params
         <div className="min-w-0 space-y-8">
           {(c.installCommand || ourInstall) && (
             <div>
-              <h2 className="mb-4 font-display text-[20px] font-semibold tracking-[-0.02em]">Install</h2>
+              <h2 className="mb-4 font-display text-[20px] font-light tracking-[-0.02em]">Install</h2>
               <div className="space-y-2">
                 {c.installCommand && <Command label={`From ${c.libraryName}`} command={c.installCommand} />}
                 {ourInstall && <Command label="From this collection" command={ourInstall} />}
@@ -154,7 +154,7 @@ async function ComponentDetail({ params }: Pick<PageProps<"/c/[...id]">, "params
           )}
           {codeFiles.length > 0 && (
             <div>
-              <h2 className="mb-4 font-display text-[20px] font-semibold tracking-[-0.02em]">Code</h2>
+              <h2 className="mb-4 font-display text-[20px] font-light tracking-[-0.02em]">Code</h2>
               <CodeTabs files={codeFiles} />
             </div>
           )}
@@ -184,7 +184,7 @@ async function ComponentDetail({ params }: Pick<PageProps<"/c/[...id]">, "params
 
       {alternatives.length > 0 && (
         <section className="mt-14">
-          <h2 className="font-display text-[24px] font-semibold tracking-[-0.022em]">Other {category?.label.toLowerCase()}</h2>
+          <h2 className="font-display text-[24px] font-light tracking-[-0.022em]">Other {category?.label.toLowerCase()}</h2>
           <p className="mt-2 mb-7 text-[15px] text-muted">The same kind of component from the other libraries in the collection.</p>
           <TileGrid columns="sm:grid-cols-2 sm:[--cols:2] lg:grid-cols-4 lg:[--cols:4]">
             {alternatives.map((a, i) => (

@@ -16,37 +16,41 @@
 | Token | Light | Dark | Use |
 |---|---|---|---|
 | `--paper` | `#F5F5F7` | `#000000` | Page background |
-| `--surface` | `#FFFFFF` | `#1C1C1E` | Cards, panels, inset lists |
+| `--surface` | `#FFFFFF` | `#232326` | Cards, panels, inset lists (a step lighter than Apple's `#1C1C1E` in dark, so cards stand clear of the black page) |
 | `--ink` | `#1D1D1F` | `#F5F5F7` | Text |
 | `--muted` | `#6E6E73` | `#98989D` | Secondary text |
 | `--line` | `rgb(0 0 0 / .08)` | `rgb(255 255 255 / .1)` | List separators, search menu divider |
 | `--fill` | `rgb(118 118 128 / .12)` | `rgb(118 118 128 / .24)` | Search button, secondary buttons, chips |
 | `--fill-strong` | `rgb(118 118 128 / .2)` | `rgb(118 118 128 / .36)` | Hover on fills, switch track |
+| `--chip` / `--chip-hover` | `#E6E6E9` / `#DCDCDF` | `#1C1C1F` / `#2B2B2E` | Solid chips: the fills as they look over the paper, so the dots don't show through |
 | `--accent` | `#D6E6FF` | `#D6E6FF` | Primary button, active chip, current selection |
 | `--accent-hover` | `#C7D9F5` | `#E5F3FF` | Primary button hover (darker in light, lighter in dark) |
 | `--accent-soft` | accent @ 75% | accent @ 16% | Selected sidebar row, focus halo, text selection |
 | `--on-accent` | `#1D1D1F` | `#1D1D1F` | Text on accent (13.3:1) |
 | `--scrollbar` | `rgb(0 0 0 / .2)` | `rgb(255 255 255 / .2)` | Scrollbar thumb while scrolling (`--scrollbar-hover` at .38 under the pointer) |
-| `--dot` | `rgb(40 80 150 / .16)` | `rgb(214 230 255 / .13)` | Blueprint dots on the page background |
+| `--dot` | `rgb(40 80 150 / .11)` | `rgb(214 230 255 / .09)` | Blueprint dots on the page background |
 | `--danger` | `#D70015` | `#FF6961` | Destructive |
 | `--ok` | `#248A3D` | `#30D158` | Success |
 
-Shadows: `--shadow-card` (resting card), `--shadow-raised` (hover). In dark mode shadows become a faint 1px light ring.
+Shadows: `--shadow-card` (resting card), `--shadow-raised` (hover). In dark mode cards have no shadow or outline: the lighter surface sets them off the black page, and raised elements keep only a soft dark drop shadow.
 
 Keyboard focus: a 3px outline mixed 40% accent / 60% ink, so it stays visible on white surfaces.
 
 ## Type
 
-- System stack: `-apple-system, BlinkMacSystemFont, "SF Pro Text"/"SF Pro Display"` (renders SF Pro on Apple devices), Inter as the fallback elsewhere. `ui-monospace / SF Mono` for code.
-- Large title 34–44px bold, tracking −0.025em. Title 20–24px semibold. Body 15–17px. Footnote 12–13px.
+- Text: **Manrope** (`--font-sans`). Headings: **Unbounded**, wide and rounded, always light (300) (`--font-display`, `font-light`). `ui-monospace / SF Mono` for code, Fira Code for "add the skill". All load through next/font in src/app/layout.tsx.
+- One serif accent: the word "All" in the home heading is **Newsreader** italic at 400 (`font-serif`), set at 1.12em so it stands as tall as the wide sans beside it.
+- Large title 34–44px light, tracking −0.025em. Title 20–24px light. Body 15–17px. Footnote 12–13px.
 - Sentence case everywhere; section labels are 12–13px semibold muted (no all caps).
 
 ## Components
 
-- **Toolbar:** no background, no bottom edge, no logo, and not sticky: it scrolls away with the page (⌘K still opens search anywhere). The theme switch and, to its right, the search button share one glass capsule (surface at 60% with blur, the card shadow); the hidden sidebar's toggle is a glass circle at the left end. The controls start 20px from the top, level with the floating sidebar's top edge. It sits in the content column beside the home sidebar.
-- **Page background:** blueprint paper, `--paper` with a 22px grid of 1px `--dot` dots (blue-grey, faint) that scrolls with the page.
+- **Toolbar:** no background, no bottom edge, no logo, and not sticky: it scrolls away with the page (⌘K still opens search anywhere). One glass capsule (surface at 60% with blur, the card shadow) holds, left to right: "add the skill" (plain lowercase Fira Code text with no pill at rest, taking the icon buttons' grey pill on hover; on hover its label gives way to the skill's install command and a copy icon, growing leftward, and a click copies it; on phones a tap copies and the label reads "copied"), the sound switch, the theme switch, and search as a plain magnifier icon (it opens the ⌘K overlay; the tooltip names the shortcut). The hidden sidebar's toggle is a glass circle at the left end. The controls start 20px from the top, level with the floating sidebar's top edge. It sits in the content column beside the home sidebar.
+- **Page background:** blueprint paper, `--paper` with a 22px grid of 1px `--dot` dots (blue-grey, faint, texture rather than pattern) that stays fixed while the page scrolls over it. It's a fixed `body::before` layer, since iPhones ignore `background-attachment: fixed`.
 - **Headings:** generous space beneath every heading (page titles 40px to the content, section titles 16px). The unfiltered home grid is titled "All Components", and the line under it says what the site is: "An aggregator of UI components: N components from …, sorted by category, with live previews and links to the originals."
 - **Name and mark:** the site is called **Components** (src/lib/site.ts). It has no logo in the page chrome; its mark, used only for the tab icon, home-screen icon and link-preview image, is four rounded ink tiles (two solid, two at 35%, one of the solid ones round) on the pale blue accent (src/components/app-mark.tsx).
+- **Phone toolbar (below sm):** the capsule becomes a notch hanging from the top edge of the screen, like the Dynamic Island grown out of it: square at the top, 24px round at the bottom, with a 16px concave flare on each side meeting the top edge at the screen's edges. Nearly opaque surface (90%) with a soft shadow below; the skill chip at its left, sound, theme and search at its right.
+- **Phones and tablets (below lg, no sidebar):** the home page shows two rows of solid chips (an opaque grey matching the fill over the paper, so the dots don't show through) just under the heading's description (16px below it, 8px apart, no scrollbar; each row fades out at whichever edge has more chips past it), then a wide gap before the grid: libraries (each toggles that library in or out of the filter, ending with the libraries link) and categories. On phones the whole header section (heading, description and chip rows) has an 80px band of space above it, below the toolbar notch, and 80px below it before the grid (64px on tablets). From sm up it sits close under the toolbar, with the usual 40px before the grid on wide screens.
 - **Read-only site:** production shows no editing: the sidebar's "Add a library" link reads "Libraries" and leads to a plain list, and the category picker on component pages is hidden.
 - **Pointer:** a white cartoon hand (public/cursors/hand.svg, drawn for this site) everywhere; over anything clickable it turns pale blue with a blue outline (hand-hover.svg). Text fields keep the text cursor.
 - **Sound:** original synthesized interface sounds in a games-console spirit (src/lib/sounds.ts). Clicking plays a short, low, dry tick (a 30ms triangle-wave blip on B4, 494Hz, with a brief noise strike and only a touch of echo); search plays two ticks rising when it opens and falling when it closes. Keep sounds low: everything around 1–2kHz was too high pitched. Hovering is silent. Quiet, nothing before the first interaction, and a mute button in the toolbar capsule (remembered per viewer).

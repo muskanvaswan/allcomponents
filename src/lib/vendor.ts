@@ -27,11 +27,17 @@ const resolveReact = (spec: string) => {
 };
 
 const ESM = "https://esm.sh";
+
+// Packages esm.sh splits badly, so they're fetched as one bundled module instead. Its build of react-aria's
+// collection code carries a second copy of the context that tells react-aria-components' parts they're in the
+// hidden pass that collects a Select's or Table's items, so those parts render outside their parents and crash.
+const BUNDLE_WHOLE = new Set(["react-aria-components"]);
+
 const esmUrl = (spec: string, range?: string) => {
   const parts = spec.split("/");
   const pkg = spec.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
   const sub = spec.slice(pkg.length);
-  return `${ESM}/${pkg}${range ? `@${encodeURIComponent(range)}` : ""}${sub}?target=es2022&external=react,react-dom`;
+  return `${ESM}/${pkg}${range ? `@${encodeURIComponent(range)}` : ""}${sub}?target=es2022&external=react,react-dom${!sub && BUNDLE_WHOLE.has(pkg) ? "&bundle" : ""}`;
 };
 
 const inflight = new Map<string, Promise<string>>();
@@ -79,7 +85,7 @@ export function npmPlugin(): esbuild.Plugin {
           const lines = args.path.slice("radix:".length).split(",").map((n) => `export * as ${n} from ${JSON.stringify(esmUrl(`@radix-ui/react-${kebab(n)}`))};`);
           return { contents: lines.join("\n"), loader: "js" };
         }
-        const source = await esmModule(args.path);
+        const source = await esmModule(await plainBuild(args.path));
         // A package's stylesheet can come back as plain CSS even under a .css.mjs name (react-tweet's theme does).
         if (/\.css(\.m?js)?(\?|$)/.test(args.path) && !/^\s*(\/\*[\s\S]*?\*\/\s*)*(import|export|var|let|const|function)\b/.test(source)) {
           return { contents: source, loader: "css" };
@@ -88,6 +94,25 @@ export function npmPlugin(): esbuild.Plugin {
       });
     },
   };
+}
+
+/**
+ * esm.sh builds a package once for each set of "external" packages. A package that doesn't use React, imported
+ * here with external=react,react-dom and also by esm.sh's own build of, say, react-aria, would load twice, with two
+ * sets of classes and caches (@internationalized/date did, breaking React Aria's date fields). Such a package is
+ * loaded from its plain build, the one esm.sh's builds import. Whether it uses React comes from its package.json.
+ */
+async function plainBuild(url: string): Promise<string> {
+  const m = url.match(/^https:\/\/esm\.sh\/((?:@[^/@?]+\/)?[^/@?]+)(?:@([^/?]+))?(\/[^?]*)?\?(.*)$/);
+  if (!m || !/(^|&)external=react,react-dom(&|$)/.test(m[4])) return url;
+  const manifest = `https://cdn.jsdelivr.net/npm/${m[1]}@${m[2] ?? "latest"}/package.json`;
+  const uses = await esmModule(manifest)
+    .then((text) => {
+      const pkg = JSON.parse(text) as { dependencies?: object; peerDependencies?: object };
+      return Object.keys({ ...pkg.dependencies, ...pkg.peerDependencies }).some((d) => /^react(-dom)?$/.test(d));
+    })
+    .catch(() => true);
+  return uses ? url : url.replace(/[?&]external=react,react-dom/, (s) => (s.startsWith("?") ? "?" : "")).replace("?&", "?");
 }
 
 /**

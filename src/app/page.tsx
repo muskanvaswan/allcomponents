@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense, type CSSProperties, type ReactNode } from "react";
+import { ChipRow } from "@/components/chip-row";
 import { ComponentTile, TileGrid } from "@/components/component-tile";
 import { LibraryFilter } from "@/components/library-filter";
+import { LibraryMark } from "@/components/library-mark";
 import { SidebarToggle } from "@/components/sidebar";
 import { SubmitForm } from "@/components/submit-form";
 import { GLASS, Toolbar } from "@/components/toolbar";
@@ -11,6 +13,7 @@ import { categoryCounts, listLibraries, READ_ONLY, totals } from "@/lib/db";
 import { searchComponents } from "@/lib/search";
 import { jsonLd, SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 import { CATEGORIES, CATEGORY_BY_ID, GROUPS } from "@/lib/taxonomy";
+import type { Library } from "@/lib/types";
 
 const PAGE_SIZE = 48;
 // Columns follow the width the grid has rather than the window's, so hiding the sidebar makes room for another one.
@@ -76,10 +79,6 @@ export default function Home(props: PageProps<"/">) {
         <Toolbar>
           {/* While the sidebar is hidden, its toggle waits here. */}
           <SidebarToggle controls="filters" className={`hidden rounded-full lg:sidebar-closed:flex ${GLASS}`} />
-          {/* The sidebar has this link on larger screens. */}
-          <Link href="/sources" className={`rounded-full px-3.5 py-2 text-[14px] font-medium text-muted hover:text-ink lg:hidden ${GLASS}`}>
-            {LIBRARIES_LINK}
-          </Link>
         </Toolbar>
         <Suspense fallback={<GridSkeleton />}>
           <Results searchParams={props.searchParams} />
@@ -186,21 +185,34 @@ async function Results({ searchParams }: SearchParamsProp) {
   const result = searchComponents({ query: q, category, library, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
   const counts = categoryCounts({ library });
   const activeCategory = category ? CATEGORY_BY_ID.get(category) : undefined;
-  const heading = q ? `“${q}”` : (activeCategory?.label ?? "All Components");
+  const heading = q ? (
+    `“${q}”`
+  ) : (
+    activeCategory?.label ?? (
+      <>
+        {/* "All" in an italic serif. The serif runs small beside the wide sans, so it's set a little larger (with no
+            extra line height), and it gets a hair of space after it, since its slant leans into the gap. */}
+        <em className="pr-[0.04em] font-serif text-[1.12em] leading-none font-normal tracking-normal">All</em> Components
+      </>
+    )
+  );
   const librariesInView = new Set(result.items.map((c) => c.librarySlug));
   const unfiltered = !q && !category && !chosen.length && page === 1;
 
   return (
-    <main className="@container pt-2 pb-8">
+    <main className="@container pt-20 pb-8 sm:pt-2">
       {unfiltered && (
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: jsonLd({ "@type": "WebSite", name: SITE_NAME, url: SITE_URL, description: SITE_DESCRIPTION, inLanguage: "en" }) }}
         />
       )}
-      <div className="mb-10 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+      {/* On phones the header section (heading, description and chip rows) gets a wide band of space, 80px, above
+          and below it. From sm up it sits close under the toolbar, with the usual 40px before the grid on wide screens. */}
+      {/* On phones the heading and its description sit 20px from the screen edge, a little in from the column. */}
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-3 max-sm:pl-1 lg:mb-10">
         <div className="min-w-0">
-          <h1 className="font-display text-[30px] leading-tight font-bold tracking-[-0.025em] sm:text-[38px]">{heading}</h1>
+          <h1 className="font-display text-[30px] leading-tight font-light tracking-[-0.025em] sm:text-[38px]">{heading}</h1>
           {unfiltered ? (
             // The first thing a visitor reads under the heading says what the site is.
             <p className="mt-2 max-w-[68ch] text-[15px] text-muted">
@@ -217,6 +229,7 @@ async function Results({ searchParams }: SearchParamsProp) {
         </div>
       </div>
 
+      <MobileLibraries sp={sp} ready={ready} chosen={chosen.map((l) => l.slug)} />
       <MobileCategories sp={sp} counts={counts} active={category} />
 
       {result.items.length ? (
@@ -227,7 +240,7 @@ async function Results({ searchParams }: SearchParamsProp) {
         </TileGrid>
       ) : (
         <div className="rounded-2xl bg-surface p-10 text-center shadow-card">
-          <p className="font-display text-[22px] font-semibold tracking-[-0.02em]">Nothing matches that yet</p>
+          <p className="font-display text-[22px] font-light tracking-[-0.02em]">Nothing matches that yet</p>
           <p className="mx-auto mt-2 max-w-[48ch] text-[15px] text-muted">
             {READ_ONLY ? "Try a broader word or clear a filter." : "Try a broader word, clear a filter, or add a library that has what you're looking for."}
           </p>
@@ -259,27 +272,59 @@ async function Results({ searchParams }: SearchParamsProp) {
   );
 }
 
+/**
+ * Without the sidebar (below lg), the libraries are a row of chips: each one toggles that library in or out of the
+ * filter, like the sidebar's checkboxes. The row ends with the sidebar's libraries link.
+ */
+function MobileLibraries({ sp, ready, chosen }: { sp: Params; ready: Library[]; chosen: string[] }) {
+  const toggled = (slug: string) => {
+    const next = chosen.includes(slug) ? chosen.filter((s) => s !== slug) : [...chosen, slug];
+    return next.join(",") || undefined;
+  };
+  return (
+    <ChipRow className="-mx-4 mb-2 flex items-center gap-2 px-4 lg:hidden">
+      {ready.map((l) => {
+        const on = chosen.includes(l.slug);
+        return (
+          <Link
+            key={l.slug}
+            href={hrefWith(sp, { library: toggled(l.slug), page: undefined })}
+            aria-pressed={on}
+            // Its own 13px text and flex box, so the line box matches the category chips' (the page's 16px would add space above).
+            className={`flex shrink-0 items-center rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${on ? "bg-accent text-on-accent" : "bg-chip hover:bg-chip-hover"}`}
+          >
+            <LibraryMark id={l.id} name={l.name} />
+          </Link>
+        );
+      })}
+      <Link href="/sources" className="shrink-0 px-2 py-1.5 text-[13px] font-medium text-muted hover:text-ink">
+        {LIBRARIES_LINK}
+      </Link>
+    </ChipRow>
+  );
+}
+
 function MobileCategories({ sp, counts, active }: { sp: Params; counts: Map<string, number>; active?: string }) {
   const cats = CATEGORIES.filter((c) => counts.get(c.id)).sort((a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0));
   return (
-    <div className="-mx-4 mb-5 flex gap-2 overflow-x-auto px-4 pb-1 lg:hidden">
+    <ChipRow className="-mx-4 mb-20 flex gap-2 px-4 sm:mb-16 lg:hidden">
       {cats.map((c) => (
         <Link
           key={c.id}
           href={hrefWith(sp, { category: c.id === active ? undefined : c.id, page: undefined })}
-          className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${c.id === active ? "bg-accent text-on-accent" : "bg-fill hover:bg-fill-strong"}`}
+          className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${c.id === active ? "bg-accent text-on-accent" : "bg-chip hover:bg-chip-hover"}`}
         >
           {c.label}
         </Link>
       ))}
-    </div>
+    </ChipRow>
   );
 }
 
 function Welcome({ indexing }: { indexing: string[] }) {
   return (
     <main className="mx-auto max-w-3xl py-12 sm:py-20">
-      <h1 className="font-display text-[40px] leading-[1.05] font-bold tracking-[-0.03em] sm:text-[56px]">Every UI library&apos;s components, in one place.</h1>
+      <h1 className="font-display text-[40px] leading-[1.05] font-light tracking-[-0.03em] sm:text-[56px]">Every UI library&apos;s components, in one place.</h1>
       <p className="mt-6 max-w-[58ch] text-[19px] leading-relaxed text-muted">
         {SITE_NAME} is an aggregator of UI components. From a link to a component library, it pulls in the components, files each one under a category like buttons,
         carousels or backgrounds, and shows them side by side with live previews and a link back to the original.
@@ -296,8 +341,8 @@ function Welcome({ indexing }: { indexing: string[] }) {
 
 function GridSkeleton() {
   return (
-    <div className="@container pt-2 pb-8">
-      <div className="mb-10 h-[90px]" />
+    <div className="@container pt-20 pb-8 sm:pt-2">
+      <div className="mb-4 h-[90px] lg:mb-10" />
       <div className={`grid grid-cols-1 gap-5 [--cols:1] ${GRID_COLUMNS}`}>
         {Array.from({ length: 8 }, (_, i) => (
           <div key={i} className="relative aspect-[4/3.7] overflow-hidden rounded-2xl bg-surface/40" style={{ "--i": i } as CSSProperties}>

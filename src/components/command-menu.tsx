@@ -99,11 +99,11 @@ export function CommandMenu({ categoryLabels }: { categoryLabels: Record<string,
         // The menu plays its own opening chime.
         data-sound="none"
         aria-keyshortcuts={apple ? "Meta+K" : "Control+K"}
-        className="flex h-9 shrink-0 items-center gap-2 rounded-full px-2.5 text-[15px] text-muted transition-colors hover:bg-fill sm:w-52 sm:pr-1.5 sm:pl-3"
+        // Just the magnifier, like the capsule's other buttons: it opens the search overlay, and the tooltip names the shortcut.
+        title={`Search (${apple ? "⌘K" : "Ctrl K"})`}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink transition-colors hover:bg-fill"
       >
         <SearchIcon />
-        <span className="hidden sm:inline">Search</span>
-        <kbd className="ml-auto hidden rounded-full bg-fill px-2 py-0.5 font-sans text-[12px] font-medium sm:inline">{apple ? "⌘K" : "Ctrl K"}</kbd>
       </button>
 
       {/* A modal <dialog> brings focus trapping, Escape to close and the backdrop. A click on the backdrop lands on the dialog itself. */}

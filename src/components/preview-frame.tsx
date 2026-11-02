@@ -165,7 +165,7 @@ export function PreviewFrame({
       )}
       {status === "error" && !isTile && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface p-6 text-center">
-          <p className="font-display text-[20px] font-semibold tracking-[-0.02em]">This one can&apos;t be previewed here</p>
+          <p className="font-display text-[20px] font-light tracking-[-0.02em]">This one can&apos;t be previewed here</p>
           <p className="max-w-[52ch] text-[14px] text-muted">{error ?? "It needs data or setup the library's docs provide."}</p>
           {original && (
             <a href={original.url} target="_blank" rel="noreferrer" className="mt-1 rounded-full bg-accent px-5 py-2 text-[14px] font-medium text-on-accent transition-colors hover:bg-accent-hover">

@@ -1,5 +1,6 @@
 import "server-only";
 import { filteredIds, ftsCandidates, summariesByIds, type Filters } from "./db";
+import { libraryRank } from "./site";
 import { categoriesForQuery, queryTokens } from "./taxonomy";
 import type { Component, ComponentSummary } from "./types";
 
@@ -13,7 +14,8 @@ const ANIMATION_WORDS = new Set(["animated", "animation", "animate", "motion", "
  * Ranks components for a query across every library. Text relevance comes from
  * SQLite FTS5; a query that names a category ("carousel") also pulls in that
  * category's members even when their names don't contain the word ("Marquee").
- * Results are interleaved by library so one big source can't drown out the rest.
+ * Results are interleaved by library so one big source can't drown out the rest. Browsing a few chosen libraries
+ * (no query) shows them one after another instead, in the site's library order.
  */
 export function searchComponents(opts: SearchOptions): SearchResult {
   const limit = Math.min(opts.limit ?? 48, 200);
@@ -23,7 +25,11 @@ export function searchComponents(opts: SearchOptions): SearchResult {
 
   if (!tokens.length) {
     const ids = filteredIds(filters);
-    const items = interleave(summariesByIds(ids)).slice(offset, offset + limit);
+    const summaries = summariesByIds(ids);
+    // The sort is stable, so each library's components keep their category-then-name order.
+    const chosen = (filters.library?.split(",").filter(Boolean).length ?? 0) > 1;
+    const ordered = chosen ? summaries.sort((a, b) => libraryRank(a.librarySlug) - libraryRank(b.librarySlug)) : interleave(summaries);
+    const items = ordered.slice(offset, offset + limit);
     return { total: ids.length, items, detectedCategories: [] };
   }
 
@@ -65,7 +71,10 @@ export function searchComponents(opts: SearchOptions): SearchResult {
   return { total: ordered.length, items: ordered.slice(offset, offset + limit), detectedCategories: detected };
 }
 
-/** Round-robins items by library, preserving each library's internal order. */
+/**
+ * Round-robins items by library, preserving each library's internal order. Each round takes the libraries in the
+ * site's chosen order (LIBRARY_ORDER), so a grid starts with EasyUI's first component, then Rare UI's, and so on.
+ */
 function interleave<T extends { librarySlug: string }>(items: T[]): T[] {
   const buckets = new Map<string, T[]>();
   for (const c of items) {
@@ -74,7 +83,7 @@ function interleave<T extends { librarySlug: string }>(items: T[]): T[] {
     else buckets.set(c.librarySlug, [c]);
   }
   const out: T[] = [];
-  const queues = [...buckets.values()];
+  const queues = [...buckets.entries()].sort(([a], [b]) => libraryRank(a) - libraryRank(b)).map(([, q]) => q);
   for (let i = 0; out.length < items.length; i++) {
     for (const q of queues) if (i < q.length) out.push(q[i]);
   }

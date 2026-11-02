@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { brotliCompressSync, brotliDecompressSync, constants } from "node:zlib";
+import { libraryRank } from "./site";
 import type { Component, ComponentSummary, Library, LibraryStatus, RepoRef } from "./types";
 
 /**
@@ -191,8 +192,11 @@ const COMPONENT_SELECT = `
 
 // ---- libraries ----
 
+/** Libraries in the site's chosen order (LIBRARY_ORDER), then any others newest first. */
 export function listLibraries(): Library[] {
-  return db().prepare("SELECT * FROM libraries ORDER BY created_at DESC").all().map(toLibrary);
+  const newestFirst = db().prepare("SELECT * FROM libraries ORDER BY created_at DESC").all().map(toLibrary);
+  // The sort is stable, so libraries that aren't in the list keep their newest-first order after the rest.
+  return newestFirst.sort((a, b) => libraryRank(a.slug) - libraryRank(b.slug));
 }
 
 export function getLibrary(idOrSlug: number | string): Library | null {
@@ -308,6 +312,13 @@ export function replaceComponents(library: Library, components: ComponentInput[]
 export function getComponent(id: string): Component | null {
   const row = db().prepare(`${COMPONENT_SELECT} WHERE c.id = ?`).get(id);
   return row ? toComponent(row) : null;
+}
+
+/** Every npm dependency the library's components declare, versioned ones first. */
+export function libraryDependencies(libraryId: number): string[] {
+  const rows = db().prepare("SELECT dependencies FROM components WHERE library_id = ?").all(libraryId);
+  const all = new Set(rows.flatMap((r) => json<string[]>(r.dependencies, [])));
+  return [...all].sort((a, b) => Number(/.@/.test(b)) - Number(/.@/.test(a)));
 }
 
 /** Every component's id and when it last changed, for the sitemap. */

@@ -56,6 +56,8 @@ export type ExtractResult = {
   repo?: RepoRef;
   components: RawComponent[];
   warnings: string[];
+  /** The library's own stylesheets (theme tokens, type ramp, globals) that its components' classes rely on. */
+  themeCss?: string;
 };
 
 export type Progress = (message: string) => void;

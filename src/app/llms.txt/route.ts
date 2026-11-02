@@ -1,6 +1,6 @@
 import { connection, type NextRequest } from "next/server";
 import { catalogue, originFrom } from "@/lib/agent";
-import { SITE_NAME } from "@/lib/site";
+import { SITE_NAME, SKILL_INSTALL } from "@/lib/site";
 
 /** How an agent should use this aggregator, in the llms.txt convention: plain Markdown at a known address. */
 export async function GET(req: NextRequest) {
@@ -14,6 +14,10 @@ export async function GET(req: NextRequest) {
 > An aggregator of UI components: ${total} components from ${libraries.length} libraries (${libraries.map((l) => l.name).join(", ")}), each filed under a category, with a live preview and a shadcn-compatible install command. Use it to find a component for a need, or to compare a component with other libraries' versions before choosing.
 
 ## For agents
+
+To have a coding agent check here whenever it builds UI, install the agent skill:
+
+    ${SKILL_INSTALL}
 
 The quickest way in is the MCP server. In Claude Code:
 

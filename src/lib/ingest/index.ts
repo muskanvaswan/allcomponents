@@ -1,9 +1,9 @@
 import "server-only";
-import { createLibrary, getLibrary, replaceComponents, updateLibrary, type ComponentInput } from "../db";
+import { createLibrary, getLibrary, replaceComponents, saveAsset, updateLibrary, type ComponentInput } from "../db";
 import { classify } from "../taxonomy";
 import { crawlDocs } from "./docs";
 import { BlockedError, fetchText } from "./fetch";
-import { collectSitePages, docsPageIndex, normalizeUrl, parseGithubUrl, slugify } from "./links";
+import { collectSitePages, docsPageIndex, normalizeUrl, parseGithubUrl, parseRawGithubUrl, slugify } from "./links";
 import { scanRepo } from "./repo";
 import { discoverRegistry, extractRegistry, humanize } from "./shadcn";
 import type { ExtractResult, Library, RawComponent } from "../types";
@@ -30,7 +30,7 @@ function stylingOf(c: RawComponent, strategy: ExtractResult["strategy"]): string
 
 /** Initial name and slug for a submitted URL, before ingestion learns the real name. */
 function guessIdentity(url: string): { name: string; slug: string } {
-  const gh = parseGithubUrl(url);
+  const gh = parseGithubUrl(url) ?? parseRawGithubUrl(url);
   if (gh) return { name: humanize(gh.repo), slug: slugify(gh.repo) };
   const host = new URL(url).hostname.replace(/^www\./, "");
   const label = host.split(".").slice(0, -1).join("-") || host;
@@ -149,12 +149,15 @@ export async function ingestLibrary(libraryId: number): Promise<void> {
       };
     });
     replaceComponents(library, records);
+    if (result.themeCss) saveAsset(`theme:${libraryId}`, result.themeCss, "text/css; charset=utf-8");
 
     const frameworks = [...new Set(records.map((r) => r.framework).filter((f): f is string => Boolean(f)))];
+    // A registry served from a repo's raw files has no site of its own here, so its repo is its homepage.
+    const raw = parseRawGithubUrl(library.url);
     updateLibrary(libraryId, {
       name: siteName || (result.name ? prettyName(result.name) : library.name),
       description: result.description ?? siteDescription ?? null,
-      homepage: result.homepage && !parseGithubUrl(result.homepage) ? result.homepage : new URL(library.url).origin,
+      homepage: result.homepage && !parseGithubUrl(result.homepage) ? result.homepage : raw ? `https://github.com/${raw.owner}/${raw.repo}` : new URL(library.url).origin,
       strategy: result.strategy,
       repo: result.repo ?? null,
       status: "ready",

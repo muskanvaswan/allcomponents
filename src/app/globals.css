@@ -18,6 +18,9 @@
   --line: rgb(0 0 0 / 0.08);
   --fill: rgb(118 118 128 / 0.12);
   --fill-strong: rgb(118 118 128 / 0.2);
+  /* The fills as they look over the paper, but opaque, for chips the dotted background shouldn't show through. */
+  --chip: #e6e6e9;
+  --chip-hover: #dcdcdf;
   --accent: #d6e6ff;
   --accent-hover: #c7d9f5;
   /* The accent is already pale, so its tint keeps most of its strength to show on paper. */
@@ -29,28 +32,32 @@
   --shadow-raised: 0 2px 6px rgb(0 0 0 / 0.05), 0 14px 36px rgb(0 0 0 / 0.1);
   --scrollbar: rgb(0 0 0 / 0.2);
   --scrollbar-hover: rgb(0 0 0 / 0.38);
-  --dot: rgb(40 80 150 / 0.16);
+  /* Faint enough to read as texture, not a pattern. */
+  --dot: rgb(40 80 150 / 0.11);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
   --paper: #000000;
-  --surface: #1c1c1e;
+  /* A step lighter than Apple's #1c1c1e, so cards stand clear of the black page with no outline. */
+  --surface: #232326;
   --ink: #f5f5f7;
   --muted: #98989d;
   --line: rgb(255 255 255 / 0.1);
   --fill: rgb(118 118 128 / 0.24);
   --fill-strong: rgb(118 118 128 / 0.36);
+  --chip: #1c1c1f;
+  --chip-hover: #2b2b2e;
   --accent: #d6e6ff;
   --accent-hover: #e5f3ff;
   --accent-soft: rgb(214 230 255 / 0.16);
   --danger: #ff6961;
   --ok: #30d158;
-  --shadow-card: 0 0 0 1px rgb(255 255 255 / 0.06);
-  --shadow-raised: 0 0 0 1px rgb(255 255 255 / 0.1), 0 14px 36px rgb(0 0 0 / 0.5);
+  --shadow-card: 0 0 #0000;
+  --shadow-raised: 0 14px 36px rgb(0 0 0 / 0.5);
   --scrollbar: rgb(255 255 255 / 0.2);
   --scrollbar-hover: rgb(255 255 255 / 0.38);
-  --dot: rgb(214 230 255 / 0.13);
+  --dot: rgb(214 230 255 / 0.09);
 }
 
 @theme inline {
@@ -61,6 +68,8 @@
   --color-line: var(--line);
   --color-fill: var(--fill);
   --color-fill-strong: var(--fill-strong);
+  --color-chip: var(--chip);
+  --color-chip-hover: var(--chip-hover);
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
@@ -69,16 +78,32 @@
   --color-ok: var(--ok);
   --shadow-card: var(--shadow-card);
   --shadow-raised: var(--shadow-raised);
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-inter), "Helvetica Neue", system-ui, sans-serif;
-  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", var(--font-inter), "Helvetica Neue", system-ui, sans-serif;
+  --font-sans: var(--font-manrope), -apple-system, BlinkMacSystemFont, "Helvetica Neue", system-ui, sans-serif;
+  /* Headings: Unbounded, wide and rounded, set light (font-light) wherever it's used. */
+  --font-display: var(--font-unbounded), var(--font-manrope), system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", var(--font-jetbrains), Menlo, monospace;
+  /* Newsreader italic, for the "All" in the home heading. */
+  --font-serif: var(--font-newsreader), ui-serif, Georgia, serif;
 }
 
-/* Blueprint paper: a fine grid of faint blue-grey dots that scrolls with the page. */
+/* Blueprint paper: a fine grid of faint blue-grey dots that stays put while the page scrolls over it. The dots are a
+   fixed layer behind everything rather than background-attachment: fixed, which iPhones ignore. It's as tall as the
+   screen with the browser's bars hidden (lvh), so no undotted strip shows as they slide away. */
 html {
-  background: radial-gradient(circle, var(--dot) 1px, transparent 1.5px) 0 0 / 22px 22px, var(--paper);
+  background: var(--paper);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100lvh;
+  background: radial-gradient(circle, var(--dot) 1px, transparent 1.5px) 0 0 / 22px 22px;
+  pointer-events: none;
 }
 
 body {
@@ -148,6 +173,39 @@ textarea,
   [data-scrolling] {
     scrollbar-color: var(--scrollbar) transparent;
   }
+}
+
+/* The page itself shows no scrollbar. A classic one (Windows, or a Mac set to always show them) keeps a 12px gutter
+   down the right of every page even while its thumb is hidden, so the page sat off-centre. Pages scroll by wheel,
+   trackpad, touch or keys. Scrolling areas inside them keep the scrollbars above. */
+:root {
+  scrollbar-width: none;
+}
+:root::-webkit-scrollbar {
+  display: none;
+}
+
+/* A sideways-scrolling row of chips fades out at whichever edge has more chips past it (ChipRow sets the data
+   attributes from its scroll position), so it's clear the row scrolls. The fades ease in and out. */
+@property --fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+.chip-row {
+  mask-image: linear-gradient(to right, transparent, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent);
+  transition: --fade-start 200ms ease, --fade-end 200ms ease;
+}
+.chip-row[data-more-start] {
+  --fade-start: 40px;
+}
+.chip-row[data-more-end] {
+  --fade-end: 72px;
 }
 
 /* In the base layer so a utility like focus:outline-none can replace it (text fields draw their own focus glow). */

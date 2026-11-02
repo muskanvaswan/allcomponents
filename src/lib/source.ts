@@ -52,7 +52,7 @@ async function fillFiles(files: ComponentFile[]): Promise<ComponentFile[]> {
   return mapLimit(files, 4, async (f) => (f.content || !f.url ? f : { ...f, content: (await fetchRaw(f.url)) ?? undefined }));
 }
 
-const DEMO_SEARCH_VERSION = 3;
+const DEMO_SEARCH_VERSION = 4;
 
 /**
  * Demos that pull components out of a lookup object, e.g.
@@ -79,6 +79,13 @@ async function findRepoDemo(repo: RepoRef, c: Component): Promise<ExampleRef | n
   const names = new Set([norm(c.slug), ...c.files.map((f) => norm(baseName(f.path)))]);
   const candidates = tree.filter((p) => {
     if (!/\.(tsx|jsx)$/.test(p) || !/(demo|example|preview|showcase)/i.test(p)) return false;
+    // A demo named just "demo.tsx" is filed under a folder named for its component, which may run on
+    // a little (Rare UI's app/components/(docs)/gooeynav/demo.tsx, or scrollprogressindicator for scroll-progress).
+    const parts = p.split("/");
+    if (/^(demo|example|preview|usage)s?$/i.test(baseName(p)) && parts.length > 1) {
+      const folder = norm(parts[parts.length - 2]);
+      return [...names].some((n) => folder === n || (n.length >= 4 && folder.startsWith(n)));
+    }
     const b = norm(baseName(p).replace(/[.-](demo|example|preview)(-?\d+)?$/i, ""));
     return names.has(b);
   });
@@ -92,7 +99,8 @@ async function findRepoDemo(repo: RepoRef, c: Component): Promise<ExampleRef | n
   const fileBases = c.files.map((f) => baseName(f.path).toLowerCase());
   const score = ({ path, content }: { path: string; content: string | null }) => {
     if (!content) return -Infinity;
-    let s = 0;
+    // Radix copies +1, other flavours -1, everything else unchanged.
+    let s = 1 - flavour(path);
     const imports = [...content.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1].split("/").pop()!.toLowerCase());
     if (imports.some((i) => fileBases.includes(i) || norm(i) === norm(c.slug))) s += 3;
     if (registryLookup(content)) s += 4;
@@ -120,8 +128,9 @@ export async function loadSource(c: Component, library: Library): Promise<Compon
   let styles: ComponentStyles | null = c.styles;
   let dependencies = c.dependencies;
   let registryDependencies = c.registryDependencies;
+  let item: RegistryItem | null = null;
   if (needsFiles && c.itemUrl) {
-    const item = await fetchJson<RegistryItem>(c.itemUrl);
+    item = await fetchJson<RegistryItem>(c.itemUrl);
     if (item) {
       const fromItem = itemFiles(item);
       if (fromItem.some((f) => f.content)) files = fromItem;
@@ -138,6 +147,12 @@ export async function loadSource(c: Component, library: Library): Promise<Compon
     if (item) example = { ...example, files: itemFiles(item) };
   }
   if (example?.files?.length) example = { ...example, files: await fillFiles(example.files) };
+  if (!example?.files?.some((f) => f.content) && c.itemUrl) {
+    // Some registries carry each item's demo as code in its meta.example (Board UI does).
+    item ??= await fetchJson<RegistryItem>(c.itemUrl);
+    const code = item?.meta?.example;
+    if (typeof code === "string" && code.trim()) example = { name: `${c.slug}-example`, files: [{ path: `examples/${c.slug}-example.tsx`, content: code }] };
+  }
   if (!example?.files?.some((f) => f.content)) {
     // An empty `files` list records "looked, found nothing" so we don't search again.
     example = (library.repo ? await findRepoDemo(library.repo, { ...c, files }) : null) ?? { files: [], searched: DEMO_SEARCH_VERSION };

@@ -97,6 +97,12 @@ export function parseGithubUrl(url: string): (RepoRef & { path: string }) | null
   return { owner: m[1], repo: m[2].replace(/\.git$/, ""), branch: m[3] ?? "HEAD", path: (m[4] ?? "").replace(/\/$/, "") };
 }
 
+/** The repo behind a raw.githubusercontent.com file URL, such as a registry published from a repo's public/r folder. */
+export function parseRawGithubUrl(url: string): (RepoRef & { path: string }) | null {
+  const m = url.match(/^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/?([^?#]*)/);
+  return m ? { owner: m[1], repo: m[2], branch: m[3], path: m[4] } : null;
+}
+
 export const rawGithubUrl = (repo: RepoRef, filePath: string) =>
   `https://raw.githubusercontent.com/${repo.owner}/${repo.repo}/${repo.branch}/${filePath.replace(/^\.?\//, "")}`;
 
