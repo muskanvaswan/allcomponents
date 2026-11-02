@@ -7,10 +7,11 @@ import { PreviewFrame } from "./preview-frame";
 
 /**
  * `columns` sets both the grid's columns and `--cols` to match, which the
- * loading ripple uses to find each tile's row and column (see .tile-wave).
+ * loading ripple uses to find each tile's row and column (see .tile-wave). The
+ * ripple also runs over the tiles while the next page loads (.tile-grid).
  */
 export function TileGrid({ children, columns = "sm:grid-cols-2 sm:[--cols:2] xl:grid-cols-3 xl:[--cols:3] 2xl:grid-cols-4 2xl:[--cols:4]" }: { children: ReactNode; columns?: string }) {
-  return <ul className={`grid grid-cols-1 gap-5 [--cols:1] ${columns}`}>{children}</ul>;
+  return <ul className={`tile-grid grid grid-cols-1 gap-5 [--cols:1] ${columns}`}>{children}</ul>;
 }
 
 /** `index` is the tile's place in its grid; `eager` starts its preview from the server's HTML. */

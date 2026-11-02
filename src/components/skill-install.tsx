@@ -1,33 +1,68 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { copyText } from "@/lib/clipboard";
 
 /**
  * "add the skill" in lowercase Fira Code, at the left end of the toolbar's glass capsule. Hovering or focusing it
  * swaps the label for the install command and a copy icon that says what a click does, growing leftward so the
- * capsule's other buttons stay put; clicking copies the command. Phones have no hover and no room for the command,
- * so a tap just copies it and the label says "copied". The toolbar passes the command in, since it's built from the
- * site's address on the server.
+ * capsule's other buttons stay put; clicking copies the command. Touch screens have no hover, so there the first tap
+ * does what hovering does, showing the command, and a second tap copies it (the label then says "copied"). Tapping
+ * anywhere else, or waiting a few seconds, folds it back. The toolbar passes the command in, since it's built from
+ * the site's address on the server.
  */
 export function SkillInstall({ command }: { command: string }) {
-  // "copied", or "select" when the browser refused to copy and the command is selected for the person to copy.
-  const [state, setState] = useState<"idle" | "copied" | "select">("idle");
+  // "revealed" after a first tap on a touch screen; "copied"; or "select" when the browser refused to copy and the
+  // command is selected for the person to copy.
+  const [state, setState] = useState<"idle" | "revealed" | "copied" | "select">("idle");
   const code = useRef<HTMLElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+
+  // A revealed command folds back after a few seconds, or as soon as the person taps anywhere else.
+  useEffect(() => {
+    if (state !== "revealed") return;
+    const timer = setTimeout(() => setState("idle"), 5000);
+    const onDown = (e: PointerEvent) => {
+      if (!button.current?.contains(e.target as Node)) setState("idle");
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("pointerdown", onDown, true);
+    };
+  }, [state]);
+
   const select = state === "select";
   const label = select ? (/Mac|iP(hone|ad)/.test(navigator.platform) ? "press ⌘C" : "press Ctrl+C") : state === "copied" ? "copied" : "add the skill";
-  // While idle, the label and the command trade places on hover or focus: one column eases shut as the other opens,
-  // so the chip only grows by the difference. Copied keeps the command open, with a tick, and the label shut, except
-  // on phones, where the label says "copied" instead. A refused copy keeps both open, the label saying what to press.
+  // While idle, the label and the command trade places on hover or focus (or a first tap, on touch screens): one
+  // column eases shut as the other opens, so the chip only grows by the difference. Copied keeps the command open,
+  // with a tick, and the label shut, except on phones, where the label says "copied" instead. A refused copy keeps
+  // both open, the label saying what to press.
   const slide = "grid min-w-0 transition-[grid-template-columns] duration-300 ease-out";
   const labelCols =
-    state === "idle" ? "grid-cols-[1fr] group-hover:grid-cols-[0fr] group-focus-visible:grid-cols-[0fr]" : select ? "grid-cols-[1fr]" : "grid-cols-[1fr] sm:grid-cols-[0fr]";
+    state === "idle"
+      ? "grid-cols-[1fr] group-hover:grid-cols-[0fr] group-focus-visible:grid-cols-[0fr]"
+      : state === "revealed"
+        ? "grid-cols-[0fr]"
+        : select
+          ? "grid-cols-[1fr]"
+          : "grid-cols-[1fr] sm:grid-cols-[0fr]";
   const commandCols =
-    state === "idle" ? "grid-cols-[0fr] group-hover:grid-cols-[1fr] group-focus-visible:grid-cols-[1fr]" : select ? "grid-cols-[1fr]" : "grid-cols-[0fr] sm:grid-cols-[1fr]";
+    state === "idle"
+      ? "grid-cols-[0fr] group-hover:grid-cols-[1fr] group-focus-visible:grid-cols-[1fr]"
+      : state === "revealed" || select
+        ? "grid-cols-[1fr]"
+        : "grid-cols-[0fr] sm:grid-cols-[1fr]";
   return (
     <button
+      ref={button}
       type="button"
       onClick={async () => {
+        // On a touch screen the first tap only shows what a second tap will copy.
+        if (state === "idle" && matchMedia("(hover: none)").matches) {
+          setState("revealed");
+          return;
+        }
         if (await copyText(command)) {
           setState("copied");
           setTimeout(() => setState("idle"), 1600);
@@ -37,7 +72,7 @@ export function SkillInstall({ command }: { command: string }) {
         }
       }}
       onBlur={() => state === "select" && setState("idle")}
-      aria-label={state === "copied" ? "Copied the install command" : `Add the agent skill: copy “${command}”`}
+      aria-label={state === "copied" ? "Copied the install command" : state === "revealed" ? `Copy “${command}”` : `Add the agent skill: copy “${command}”`}
       title="Lets coding agents like Claude Code pick components from here as they build, and show you the alternatives"
       // Plain text in the capsule until hovered, when it gets the same pill as the icon buttons beside it. It keeps
       // the pill while "copied" or "press ⌘C" shows.

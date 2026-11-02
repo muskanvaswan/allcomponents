@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import type { ComponentSummary } from "@/lib/types";
+import { startNavigation } from "@/lib/navigation";
 import { playSound } from "@/lib/sounds";
 import { LibraryMark } from "./library-mark";
 
@@ -73,6 +74,7 @@ export function CommandMenu({ categoryLabels }: { categoryLabels: Record<string,
 
   const go = (o: Option) => {
     dialog.current?.close();
+    startNavigation(o.href);
     router.push(o.href);
   };
 

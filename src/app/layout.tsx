@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Fira_Code, JetBrains_Mono, Manrope, Newsreader, Unbounded } from "next/font/google";
+import { Suspense } from "react";
+import { NavigationStatus } from "@/components/navigation-status";
 import { SoundEffects } from "@/components/sound";
 import { PREVIEW_BRIDGE_SCRIPT } from "@/lib/preview-bridge";
 import { SCROLLBAR_SCRIPT } from "@/lib/scrollbars";
@@ -54,6 +56,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-dvh">
         {children}
         <SoundEffects />
+        {/* It reads the address, which isn't known while the static shell is built, so it waits for the browser. */}
+        <Suspense fallback={null}>
+          <NavigationStatus />
+        </Suspense>
       </body>
     </html>
   );

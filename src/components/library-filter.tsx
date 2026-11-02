@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { startTransition, useOptimistic, type ReactNode } from "react";
+import { startNavigation } from "@/lib/navigation";
 
 type Library = { slug: string; name: string; count: number };
 
@@ -18,7 +19,9 @@ export function LibraryFilter({ libraries, selected, base }: { libraries: Librar
       setTicked(next);
       // Slugs are URL-safe, and a literal comma reads better than %2C.
       const slugs = libraries.filter((l) => next.includes(l.slug)).map((l) => l.slug);
-      router.push(slugs.length ? `${base}${base.includes("?") ? "&" : "?"}library=${slugs.join(",")}` : base);
+      const href = slugs.length ? `${base}${base.includes("?") ? "&" : "?"}library=${slugs.join(",")}` : base;
+      startNavigation(href);
+      router.push(href);
     });
 
   return (
