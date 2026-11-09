@@ -65,7 +65,7 @@ export async function generateMetadata({ searchParams }: PageProps<"/">): Promis
 }
 
 const navItem = (active: boolean) =>
-  `flex items-baseline justify-between gap-2 rounded-lg px-2.5 py-1.5 text-[14px] transition-colors ${active ? "bg-accent-soft font-medium" : "hover:bg-fill"}`;
+  `flex items-baseline justify-between gap-2 rounded-lg px-2.5 py-1.5 text-[14px] transition-colors ${active ? "bg-accent-soft" : "hover:bg-fill"}`;
 
 export default function Home(props: PageProps<"/">) {
   // The toolbar and the sidebar's frame don't wait for the database, so they're up straight away.

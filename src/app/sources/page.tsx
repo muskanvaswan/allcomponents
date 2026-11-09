@@ -33,7 +33,7 @@ export default function SourcesPage() {
           </Link>
         </nav>
         <h1 className="font-display text-[34px] leading-tight font-light tracking-[-0.025em] sm:text-[40px]">{TITLE}</h1>
-        <p className="mt-4 max-w-[62ch] text-[17px] leading-relaxed text-muted">
+        <p className="mt-4 max-w-[62ch] text-[15px] leading-relaxed text-muted">
           {SITE_NAME} aggregates components from these UI libraries. Libraries that publish a shadcn registry come in with their full source, so every component gets a
           live preview. For other sites, it reads the docs pages and links each component back to its original page.
         </p>
@@ -59,7 +59,7 @@ async function Sources() {
           </div>
         </>
       )}
-      <h2 className={`${READ_ONLY ? "mt-10" : "mt-12"} mb-3 px-1 text-[13px] font-semibold text-muted`}>In the collection</h2>
+      <h2 className={`${READ_ONLY ? "mt-10" : "mt-12"} mb-3 px-1 text-[13px] font-medium text-muted`}>In the collection</h2>
       {libraries.length === 0 ? (
         <p className="text-[15px] text-muted">No libraries yet. Add one above and its components will show up in the collection.</p>
       ) : (
