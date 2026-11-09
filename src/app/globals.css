@@ -238,6 +238,15 @@ textarea,
 [data-theme="dark"] .shiki span {
   color: var(--shiki-dark) !important;
 }
+/* The stock GitHub token colors miss WCAG AA (4.5:1) at code size: orange
+   #e36209 on white is 3.49:1, comment grey #6a737d on the dark surface is
+   3.25:1. Swap in palette colors that pass (#d73a49 ≈ 4.9:1, #98989d ≈ 5.6:1). */
+:root:not([data-theme="dark"]) .shiki span[style*="color:#E36209" i] {
+  color: #d73a49 !important;
+}
+[data-theme="dark"] .shiki span[style*="--shiki-dark:#6A737D" i] {
+  color: var(--muted) !important;
+}
 
 /* Loading: a slow, faint ripple that rolls across the grid along its diagonals,
    like a Wii menu settling in. Each tile's swell comes a beat after the tile
