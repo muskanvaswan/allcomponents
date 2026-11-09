@@ -1,6 +1,6 @@
 ---
 name: allcomps
-description: Finds ready-made React + Tailwind components in the Components catalogue (allcomps.vercel.app), which gathers hundreds of components from shadcn/ui, Magic UI, EasyUI, Board UI, Rare UI, Pin UI and more, each with a live preview and a shadcn install command. Use whenever building or changing UI, whether a page, a section, a form, a dashboard or a single component such as a date picker, pricing table, sidebar, carousel, chart, toast or animated text, before writing that component from scratch. When several components fit, shows the user the alternatives with preview links and lets them choose; then installs the chosen one with the shadcn CLI.
+description: Finds ready-made React + Tailwind components in the Components catalogue (allcomps.vercel.app), which gathers hundreds of components from shadcn/ui, Magic UI, EasyUI, Board UI, Rare UI, Pin UI, VantaUI and more, each with a live preview and a shadcn install command. Use whenever building or changing UI, whether a page, a section, a form, a dashboard or a single component such as a date picker, pricing table, sidebar, carousel, chart, toast or animated text, before writing that component from scratch. When several components fit, shows the user the alternatives with preview links and lets them choose; then installs the chosen one with the shadcn CLI.
 ---
 
 # Components catalogue

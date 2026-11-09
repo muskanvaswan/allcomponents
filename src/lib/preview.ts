@@ -343,6 +343,10 @@ html[data-frame="tile"] { overflow: hidden; }
    centred layout, leaving a chart sized "100% wide" with nothing to fill. It gets a comfortable width instead.
    It's in the base layer, so a width the demo does set (a Tailwind utility) still wins. */
 @layer base { #root > [data-slot="card"] { width: min(100%, 36rem); } }
+/* A demo that's a whole page (a <main>, or anything as tall or wide as the screen) fills the frame, rather than
+   shrinking to its content in the centred, padded layout other demos get. */
+#root:has(> :is(main, .h-screen, .min-h-screen, .h-dvh, .min-h-dvh, .w-screen)) { padding: 0; align-items: stretch; }
+#root > :is(main, .h-screen, .min-h-screen, .h-dvh, .min-h-dvh, .w-screen) { flex: 1 1 auto; width: 100%; }
 .__preview-error { font: 14px/1.5 system-ui, sans-serif; color: #737373; text-align: center; max-width: 320px; }
 ${parts.css ?? ""}
 </style>
@@ -430,6 +434,29 @@ async function rewriteLookup(
 }
 
 /**
+ * Files an item ships to `public/` (VantaUI's store badges and paper textures). The registry's own site serves them
+ * at the same path, so code and styles that name them get that address. They're never inlined: a registry's copy
+ * of a binary file arrives garbled.
+ */
+function shippedAssets(c: Component, assets: Awaited<ReturnType<typeof repoAssets>>): Awaited<ReturnType<typeof repoAssets>> {
+  const origin = c.itemUrl ? new URL(c.itemUrl).origin : null;
+  const paths = new Set(c.files.map((f) => f.target ?? f.path).filter((p) => p.startsWith("public/")).map((p) => p.slice("public".length)));
+  const at = (p: string) => (origin && paths.has(p.replace(/[?#].*$/, "")) ? `${origin}${p}` : null);
+  return {
+    cssUrl: (spec, importer) => at(spec) ?? assets.cssUrl(spec, importer),
+    inCode: (code) =>
+      assets.inCode(
+        paths.size && origin
+          ? code.replace(/(["'`])(\/[\w./-]+)\1/g, (m, quote: string, p: string) => {
+              const url = at(p);
+              return url ? `${quote}${url}${quote}` : m;
+            })
+          : code,
+      ),
+  };
+}
+
+/**
  * Maps paths in a library's code to the files in its GitHub repo, so images and
  * sounds load in the preview. A docs site that is its own repo refers to its
  * `public/` folder with root-relative paths: "/library/shoe.jpg", or a folder
@@ -468,7 +495,7 @@ async function repoAssets(library: Library) {
 }
 
 async function bundleReact(c: Component, library: Library): Promise<PreviewResult> {
-  const assets = await repoAssets(library);
+  const assets = shippedAssets(c, await repoAssets(library));
   const graph = new SourceGraph(library);
   graph.itemUrl = c.itemUrl;
   graph.addDeps(c.dependencies);
@@ -477,7 +504,13 @@ async function bundleReact(c: Component, library: Library): Promise<PreviewResul
   graph.addDeps(libraryDependencies(library.id));
   const mainFiles = c.files.filter((f) => f.content && /\.(tsx|jsx|ts|js|css)$/.test(f.path));
   if (!mainFiles.some((f) => /\.(tsx|jsx|js)$/.test(f.path))) return { ok: false, html: errorHtml("No source code is available for a live preview."), error: "no-source" };
-  for (const f of c.files) if (f.content) graph.add(f.path, f.content, [f.target, `components/${c.librarySlug}/${c.slug}`, `components/ui/${c.slug}`]);
+  // The component's own import paths (what a demo imports) lead to its code: the file named after it, else the first.
+  // Images and other files shipped alongside (VantaUI's store badges) keep only their own paths.
+  const code = c.files.filter((f) => f.content && /\.(tsx|jsx|ts|js)$/.test(f.path));
+  const own = code.find((f) => stripExt(f.path.split("/").pop()!) === c.slug) ?? code[0];
+  for (const f of c.files) {
+    if (f.content) graph.add(f.path, f.content, f === own ? [f.target, `components/${c.librarySlug}/${c.slug}`, `components/ui/${c.slug}`] : [f.target]);
+  }
 
   // Registry dependencies: a full item URL, `@magicui/marquee`, or a bare name, which means the library's own
   // item when its registry has one (Board UI's `button`, `cx`) and otherwise a shadcn/ui primitive.

@@ -1,6 +1,7 @@
 import "server-only";
 import { fetchJson, mapLimit } from "./fetch";
 import { githubRepoFromHtml, parseGithubUrl, rawGithubUrl, sameSite, slugify } from "./links";
+import { isFree, type Tiers } from "./tiers";
 import type { ComponentFile, ExtractResult, Progress, RawComponent, RepoRef } from "../types";
 
 // Libraries following the shadcn registry spec publish an index of items
@@ -18,6 +19,8 @@ export type RegistryItem = {
   registryDependencies?: string[];
   files?: (string | { path: string; content?: string; type?: string; target?: string })[];
   categories?: string[];
+  /** Notes on using the item, in Markdown; some registries put a usage example in a code block here. */
+  docs?: string;
   meta?: Record<string, unknown>;
   cssVars?: Record<string, Record<string, string>>;
   css?: Record<string, unknown>;
@@ -218,7 +221,7 @@ async function workingTemplate(templates: string[], name: string): Promise<strin
 
 export async function extractRegistry(
   registry: Registry,
-  ctx: { landingHtml: string | null; docsIndex: Map<string, string>; progress: Progress },
+  ctx: { landingHtml: string | null; docsIndex: Map<string, string>; progress: Progress; tiers?: Tiers | null },
 ): Promise<ExtractResult> {
   const warnings: string[] = [];
   const homepageRepo = registry.homepage ? parseGithubUrl(registry.homepage) : null;
@@ -228,6 +231,13 @@ export async function extractRegistry(
 
   let kept = registry.items.filter((i) => KEEP_TYPES.has(i.type ?? ""));
   if (!kept.length) kept = registry.items.filter((i) => !SKIP_TYPES.has(i.type ?? ""));
+  // A library that sells some of its components: only the ones it marks free, before anything else is fetched.
+  if (ctx.tiers) {
+    const tiers = ctx.tiers;
+    const before = kept.length;
+    kept = kept.filter((i) => isFree(tiers, i.name, i.title));
+    if (before > kept.length) warnings.push(`Left out ${before - kept.length} components that aren't marked free in the library's llms.txt.`);
+  }
   // shadcn/ui files some demos as internal items (`sidebar-demo`); a `<name>-demo` counts as a demo whatever its type.
   const examples = registry.items.filter((i) => i.type === "registry:example" || (i.type === "registry:internal" && i.name.endsWith("-demo")));
   const collapsed = collapseVariants(kept);
@@ -292,7 +302,9 @@ export async function extractRegistry(
       sourceUrl: repo && files[0] ? `https://github.com/${repo.owner}/${repo.repo}/blob/${repo.branch}/${files[0].path}` : undefined,
       itemUrl,
       files,
-      example: example ? { name: example.name, itemUrl: template ? fill(template, example.name) : undefined, files: filesOf(example, repo).filter((f) => f.content || f.url) } : undefined,
+      example: example
+        ? { name: example.name, itemUrl: template ? fill(template, example.name) : undefined, files: filesOf(example, repo).filter((f) => f.content || f.url) }
+        : docsExample(item),
       styles: item.cssVars || item.css || item.tailwind ? { cssVars: item.cssVars, css: item.css, tailwind: item.tailwind } : undefined,
       variants,
       kind: item.type?.replace("registry:", ""),
@@ -339,6 +351,20 @@ async function registryStyles(registry: Registry, template: string): Promise<str
 const ACRONYMS = new Set(["ai", "ui", "cta", "faq", "otp", "kpi", "svg", "css", "url", "api", "pdf", "qr", "os"]);
 
 /** "text-reveal-card" → "Text Reveal Card"; leaves already-human titles alone. */
+/**
+ * A usage example from an item's docs, for registries that have no separate example items but put one in the
+ * item's notes (VantaUI): the first TSX or JSX code block that default-exports a page. Without it, a component that
+ * needs its label or text passed in renders nothing in its preview.
+ */
+function docsExample(item: RegistryItem): RawComponent["example"] {
+  for (const m of item.docs?.matchAll(/```(tsx|jsx)\n([\s\S]*?)```/g) ?? []) {
+    if (!/export\s+default\s/.test(m[2])) continue;
+    const name = `${item.name}-usage`;
+    return { name, files: [{ path: `${name}.${m[1]}`, content: m[2] }] };
+  }
+  return undefined;
+}
+
 export function humanize(s: string): string {
   if (/\s/.test(s) || /^[A-Z][a-z]+[A-Z]/.test(s)) return s.replace(/([a-z])([A-Z])/g, "$1 $2");
   return s

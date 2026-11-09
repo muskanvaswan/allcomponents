@@ -6,6 +6,7 @@ import { BlockedError, fetchText } from "./fetch";
 import { collectSitePages, docsPageIndex, normalizeUrl, parseGithubUrl, parseRawGithubUrl, slugify } from "./links";
 import { scanRepo } from "./repo";
 import { discoverRegistry, extractRegistry, humanize } from "./shadcn";
+import { isFree, tiersFromLlmsTxt } from "./tiers";
 import type { ExtractResult, Library, RawComponent } from "../types";
 
 const ANIMATION_DEPS = /^(framer-motion|motion|gsap|@gsap\/|react-spring|@react-spring\/|animejs|lottie|@lottiefiles\/|three|@react-three\/|ogl|postprocessing|motion-v|@vueuse\/motion|@formkit\/auto-animate|canvas-confetti|matter-js|cobe|@paper-design\/shaders)/;
@@ -108,16 +109,36 @@ export async function ingestLibrary(libraryId: number): Promise<void> {
     progress("Mapping documentation pages");
     const pages = isGithub ? [] : await collectSitePages(library.url, landingHtml);
 
+    // Some libraries sell part of their collection and mark which items are free in their llms.txt; only those are
+    // gathered. A registry skips the rest before reading them; the other ways filter what they found.
+    progress("Checking which components are free");
+    const tiers = isGithub ? null : await tiersFromLlmsTxt([library.url, ...(registry?.homepage ? [registry.homepage] : [])]);
+
     let result: ExtractResult;
     if (registry) {
       progress(`Reading registry ${registry.indexUrl}`);
-      result = await extractRegistry(registry, { landingHtml, docsIndex: docsPageIndex(pages, library.url), progress });
+      result = await extractRegistry(registry, { landingHtml, docsIndex: docsPageIndex(pages, library.url), progress, tiers });
     } else if (github) {
       result = await scanRepo(github, { progress });
     } else {
       result = await crawlDocs(library.url, pages, { progress });
     }
+    if (tiers && !registry) {
+      const before = result.components.length;
+      result.components = result.components.filter((c) => isFree(tiers, c.slug, c.name));
+      if (before > result.components.length) result.warnings.push(`Left out ${before - result.components.length} components that aren't marked free in the library's llms.txt.`);
+    }
     if (!result.components.length) throw new Error(result.warnings[0] ?? "No components found at this URL.");
+
+    // A registry file submitted directly has no page of its own, so its name and description come from the homepage
+    // it names, if that's a site rather than a repo.
+    if (!landingHtml && result.homepage && !parseGithubUrl(result.homepage)) {
+      const home = await fetchText(result.homepage, { timeoutMs: 15_000, retries: 1 }).catch(() => null);
+      if (home?.ok) {
+        siteName = await siteNameFor(home.url, home.text);
+        siteDescription = metaContent(home.text, "name", "description");
+      }
+    }
 
     progress(`Categorising ${result.components.length} components`);
     const records: ComponentInput[] = result.components.map((c) => {
