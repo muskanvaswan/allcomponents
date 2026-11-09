@@ -100,3 +100,12 @@ An agent can ask the aggregator for components that fit a need, or for other lib
   ```
 
 - **HTTP:** `GET /api/alternatives?query=animated+pricing+table` finds candidates; `GET /api/alternatives?for=magicui/marquee` finds alternatives to a component. Both take `category`, `library` and `limit` (1-24, default 8).
+
+## Product analytics
+
+[Polishd](https://polishd.site) (`@polishd/next`) records how visitors use the site (rage and dead clicks, scroll depth, web vitals) and reviews its design, with a dashboard at `/polishd`. Its pieces: `src/proxy.ts` gives each visitor an anonymous session cookie, `src/instrumentation-client.ts` starts capture, `src/app/api/polishd/route.ts` stores events, and `src/app/polishd/page.tsx` is the dashboard. The proxy only runs on pages: previews, the registry, the MCP server, the agent files and metadata routes are left out. Neither file declares `runtime` or `dynamic`, which Polishd's own scaffold adds but `cacheComponents` rejects, so `npx polishd doctor` reports them as missing; that's expected here.
+
+Locally, events go to `.polishd/analytics.db` (ignored by git and the Vercel CLI) with nothing to set up. In production:
+
+- `POLISHD_DASHBOARD_TOKEN` (make one with `openssl rand -hex 32`) unlocks the dashboard. Without it, production shows a locked screen.
+- `POLISHD_DATABASE_URL`, a pooled Postgres connection string, is where production events go. Vercel's disk is read-only, so until it's set, capture does nothing in production (with a warning in the logs) and the site is otherwise unaffected.
