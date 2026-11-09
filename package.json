@@ -14,7 +14,7 @@
     "snapshot": "tsx --conditions=react-server scripts/snapshot.mts"
   },
   "dependencies": {
-    "@polishd/next": "^0.3.1",
+    "@polishd/next": "^0.3.2",
     "@tailwindcss/node": "^4.3.3",
     "@tailwindcss/oxide": "^4.3.3",
     "cheerio": "^1.2.0",

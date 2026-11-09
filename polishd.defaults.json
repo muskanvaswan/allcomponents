@@ -1,0 +1,15 @@
+{
+  "site": {
+    "description": "An aggregator of React and Tailwind UI components gathered from shadcn/ui, Magic UI and other libraries, sorted by category, each with a live preview, its install command and a link to the original. Visitors browse by category or library, search, open a component's page and copy its install command; coding agents use it through /mcp, /api/alternatives, /llms.txt and the /skill. The public site is read-only, with no accounts; /polishd is owner-only.",
+    "audience": "Developers building React and Tailwind interfaces, and the coding agents working for them",
+    "values": ""
+  },
+  "github": {
+    "repo": "muskanvaswan/allcomponents"
+  },
+  "ai": {
+    "provider": "",
+    "model": "",
+    "apiKeyEnv": ""
+  }
+}

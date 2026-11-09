@@ -6,13 +6,17 @@
 import "@polishd/next/dashboard.css";
 import { createPolishdPage } from "@polishd/next/dashboard";
 
-// Its own title, and kept out of search engines.
+// What the site is, its repository and its model: defaults the dashboard
+// opens with, which anything saved in the dashboard overrides. Committed,
+// so never put a key in it.
+import defaults from "../../../polishd.defaults.json";
+
+// The dashboard's metadata, which keeps /polishd out of search engines.
 export { metadata } from "@polishd/next/dashboard";
 
-// No `runtime` or `dynamic` here: with cacheComponents on, Next rejects both.
-// Pages already run on Node. The dashboard reads cookies and the database on
-// every request and has no static shell worth prerendering, so it may block.
-export const instant = false;
+// cacheComponents is on, so there is no `runtime` or `dynamic` here: Next
+// rejects both. Node is already the runtime, and nothing here is cached.
+
 // Server actions inherit this page's time limit; 300s gives the AI
 // analyses headroom on hosts with strict function limits.
 export const maxDuration = 300;
@@ -21,4 +25,6 @@ export const maxDuration = 300;
 // POLISHD_DASHBOARD_TOKEN, pass your own `authenticate`, or opt out
 // explicitly with POLISHD_DASHBOARD_PUBLIC=true. It can change your AI
 // settings and spend your model tokens, so it is not public by default.
-export default createPolishdPage();
+// `suspense` renders it inside <Suspense>, which Cache Components needs
+// around the cookies it reads on every request.
+export default createPolishdPage({ defaults, suspense: true });

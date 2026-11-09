@@ -2,7 +2,7 @@
 // this file before regenerating it.
 import { createPolishdRoute } from "@polishd/next/route";
 
-// No `runtime` or `dynamic` here: with cacheComponents on, Next rejects both.
-// Its routes already run on Node (node:sqlite / pg need it), and a POST
-// handler is never cached.
+// cacheComponents is on, so there is no `runtime` or `dynamic` here: Next
+// rejects both. Node is already the runtime, and nothing here is cached.
+
 export const POST = createPolishdRoute();
