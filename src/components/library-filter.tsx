@@ -1,18 +1,40 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { startTransition, useOptimistic, type ReactNode } from "react";
+import { startTransition, useOptimistic, useSyncExternalStore, type ReactNode } from "react";
 import { startNavigation } from "@/lib/navigation";
+import { SOURCES_KEY } from "@/lib/sidebar";
 
 type Library = { slug: string; name: string; count: number };
 
+// Whether the list is collapsed lives on <html data-sources="collapsed">, set before paint by SIDEBAR_SCRIPT.
+// The list and the arrow switch through the `sources-collapsed:` variant, so they're right before this code runs.
+const listeners = new Set<() => void>();
+const readOpen = () => document.documentElement.dataset.sources !== "collapsed";
+
+function setOpen(open: boolean) {
+  try {
+    localStorage.setItem(SOURCES_KEY, open ? "open" : "collapsed");
+  } catch {}
+  if (open) delete document.documentElement.dataset.sources;
+  else document.documentElement.dataset.sources = "collapsed";
+  listeners.forEach((l) => l());
+}
+
+function subscribe(l: () => void) {
+  listeners.add(l);
+  return () => listeners.delete(l);
+}
+
 /**
  * Narrows the grid to any mix of libraries; nothing ticked means all of them.
- * A tick shows straight away while the page loads.
+ * A tick shows straight away while the page loads. The heading collapses the
+ * list (and `footer`, the link under it); while collapsed it says how many are ticked.
  */
-export function LibraryFilter({ libraries, selected, base }: { libraries: Library[]; selected: string[]; base: string }) {
+export function LibraryFilter({ libraries, selected, base, footer }: { libraries: Library[]; selected: string[]; base: string; footer?: ReactNode }) {
   const router = useRouter();
   const [ticked, setTicked] = useOptimistic(selected);
+  const open = useSyncExternalStore(subscribe, readOpen, () => true);
 
   const choose = (next: string[]) =>
     startTransition(() => {
@@ -25,22 +47,52 @@ export function LibraryFilter({ libraries, selected, base }: { libraries: Librar
     });
 
   return (
-    <fieldset>
-      <legend className="mb-2.5 px-2.5 text-[12px] font-semibold text-muted">Sources</legend>
-      <div className="space-y-px">
-        <Row checked={ticked.length === 0} onChange={() => choose([])} count={libraries.reduce((n, l) => n + l.count, 0)}>
-          All libraries
-        </Row>
-        {libraries.map((l) => (
-          <Row
-            key={l.slug}
-            checked={ticked.includes(l.slug)}
-            onChange={() => choose(ticked.includes(l.slug) ? ticked.filter((s) => s !== l.slug) : [...ticked, l.slug])}
-            count={l.count}
+    <fieldset className="mb-7">
+      <legend className="mb-2.5 w-full sources-collapsed:mb-0">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-controls="sources-list"
+          title={open ? "Collapse sources" : "Expand sources"}
+          className="-my-1 flex w-full items-center gap-1 rounded-md px-2.5 py-1 text-[12px] font-semibold text-muted transition-colors hover:text-ink"
+        >
+          Sources
+          {/* Points up while the list is open (press to fold it away), down while it's collapsed. */}
+          <svg
+            className="rotate-180 transition-transform duration-200 sources-collapsed:rotate-0"
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
           >
-            {l.name}
+            <path d="M3 4.5 6 7.5l3-3" />
+          </svg>
+          {ticked.length > 0 && <span className="ml-auto hidden font-medium tabular-nums sources-collapsed:inline">{ticked.length} selected</span>}
+        </button>
+      </legend>
+      <div id="sources-list" className="sources-collapsed:hidden">
+        <div className="space-y-px">
+          <Row checked={ticked.length === 0} onChange={() => choose([])} count={libraries.reduce((n, l) => n + l.count, 0)}>
+            All libraries
           </Row>
-        ))}
+          {libraries.map((l) => (
+            <Row
+              key={l.slug}
+              checked={ticked.includes(l.slug)}
+              onChange={() => choose(ticked.includes(l.slug) ? ticked.filter((s) => s !== l.slug) : [...ticked, l.slug])}
+              count={l.count}
+            >
+              {l.name}
+            </Row>
+          ))}
+        </div>
+        {footer}
       </div>
     </fieldset>
   );

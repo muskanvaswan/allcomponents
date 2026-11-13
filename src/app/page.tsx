@@ -122,10 +122,12 @@ async function Sidebar({ searchParams }: SearchParamsProp) {
         libraries={ready.map((l) => ({ slug: l.slug, name: l.name, count: l.componentCount }))}
         selected={chosen.map((l) => l.slug)}
         base={hrefWith(sp, { library: undefined, page: undefined })}
+        footer={
+          <Link href="/sources" className="mt-2 ml-2.5 inline-block text-[13px] font-medium text-muted hover:text-ink">
+            {LIBRARIES_LINK}
+          </Link>
+        }
       />
-      <Link href="/sources" className="mt-2 mb-7 ml-2.5 inline-block text-[13px] font-medium text-muted hover:text-ink">
-        {LIBRARIES_LINK}
-      </Link>
 
       <nav aria-label="Categories" className="space-y-6">
         <Link href={hrefWith(sp, { category: undefined, page: undefined })} className={navItem(!category)}>

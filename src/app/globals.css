@@ -9,6 +9,9 @@
 /* Applies when the viewer has hidden the filters sidebar: <html data-sidebar="closed">, set before paint (src/lib/sidebar.ts). */
 @custom-variant sidebar-closed (&:where([data-sidebar="closed"] *));
 
+/* Applies when the viewer has folded away the sidebar's Sources list: <html data-sources="collapsed">, set before paint (src/lib/sidebar.ts). */
+@custom-variant sources-collapsed (&:where([data-sources="collapsed"] *));
+
 :root {
   color-scheme: light;
   --paper: #f5f5f7;
