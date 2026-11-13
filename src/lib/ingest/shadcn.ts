@@ -2,6 +2,7 @@ import "server-only";
 import { fetchJson, mapLimit } from "./fetch";
 import { githubRepoFromHtml, parseGithubUrl, rawGithubUrl, sameSite, slugify } from "./links";
 import { isFree, type Tiers } from "./tiers";
+import { repoTree } from "../source";
 import type { ComponentFile, ExtractResult, Progress, RawComponent, RepoRef } from "../types";
 
 // Libraries following the shadcn registry spec publish an index of items
@@ -156,6 +157,32 @@ export async function discoverRegistry(inputUrl: string, landingHtml: string | n
   return null;
 }
 
+/**
+ * The item a `<name>-demo` (or `-example`, `-preview`, perhaps with a further suffix like `-demo-upload`) shows, when
+ * that item is one of `names`. Cult UI's `hero-color-panels-demo` shows `hero-color-panel`.
+ */
+function demoParent(name: string, names: Set<string>): string | null {
+  const stripped = name.replace(/-(demo|example|preview)(-[\w]+)?$/, "");
+  if (stripped === name) return null;
+  return [stripped, stripped.replace(/s$/, "")].find((n) => names.has(n)) ?? null;
+}
+
+/**
+ * The GitHub page for a registry file. A registry's paths aren't always the repo's: Cult UI's
+ * `registry/default/ui/x.tsx` sits in an app folder, and every Kibo UI item is an `index.tsx` that lives in
+ * `packages/<name>/`. So the path is looked up in the repo's file list, and a file that can't be found links to
+ * the repo itself rather than to a missing page. Without the list (GitHub's API refused), the path is used as is.
+ */
+function sourceUrlOf(repo: RepoRef, tree: Set<string> | null, filePath: string, itemName: string): string {
+  const base = `https://github.com/${repo.owner}/${repo.repo}`;
+  const path = filePath.replace(/^\/+/, "");
+  if (!tree?.size || tree.has(path)) return `${base}/blob/${repo.branch}/${path}`;
+  const ends = (suffix: string) => [...tree].filter((p) => p.endsWith(`/${suffix}`));
+  const found = ends(path);
+  const hit = found.length === 1 ? found[0] : ends(`${itemName}/${path.split("/").pop()}`)[0];
+  return hit ? `${base}/blob/${repo.branch}/${hit}` : base;
+}
+
 const VARIANT_SUFFIX = /-(js|ts)-(css|tw)$/i;
 const VARIANT_PREFERENCE = ["ts-tw", "js-tw", "ts-css", "js-css"];
 
@@ -231,6 +258,12 @@ export async function extractRegistry(
 
   let kept = registry.items.filter((i) => KEEP_TYPES.has(i.type ?? ""));
   if (!kept.length) kept = registry.items.filter((i) => !SKIP_TYPES.has(i.type ?? ""));
+  // A `<name>-demo` of another item counts as that item's demo whatever its type: shadcn/ui files some as internal
+  // items (`sidebar-demo`), Cult UI as components (`cosmic-button-demo`).
+  const shown = new Set(kept.map((i) => i.name));
+  kept = kept.filter((i) => !demoParent(i.name, shown));
+  // Deprecated aliases (Cult UI's `animated-badge` now installs `halo-badge`) would only repeat what replaced them.
+  kept = kept.filter((i) => !/^deprecated\b/i.test(i.description ?? ""));
   // A library that sells some of its components: only the ones it marks free, before anything else is fetched.
   if (ctx.tiers) {
     const tiers = ctx.tiers;
@@ -238,8 +271,7 @@ export async function extractRegistry(
     kept = kept.filter((i) => isFree(tiers, i.name, i.title));
     if (before > kept.length) warnings.push(`Left out ${before - kept.length} components that aren't marked free in the library's llms.txt.`);
   }
-  // shadcn/ui files some demos as internal items (`sidebar-demo`); a `<name>-demo` counts as a demo whatever its type.
-  const examples = registry.items.filter((i) => i.type === "registry:example" || (i.type === "registry:internal" && i.name.endsWith("-demo")));
+  const examples = registry.items.filter((i) => i.type === "registry:example" || demoParent(i.name, shown));
   const collapsed = collapseVariants(kept);
   ctx.progress(`Found ${collapsed.length} components in the registry`);
 
@@ -266,14 +298,14 @@ export async function extractRegistry(
   const exampleFor = new Map<string, RegistryItem>();
   for (const ex of examples) {
     const parents = (ex.registryDependencies ?? []).map(depName).filter((n) => keptNames.has(n));
-    const stripped = ex.name.replace(/-(demo|example|preview)(-[\w]+)?$/, "");
-    const parent = keptNames.has(stripped) ? stripped : parents[0];
+    const parent = demoParent(ex.name, keptNames) ?? parents[0];
     if (!parent) continue;
     const prev = exampleFor.get(parent);
     // Prefer the canonical `<name>-demo` over numbered or themed variants.
     if (!prev || ex.name === `${parent}-demo`) exampleFor.set(parent, ex);
   }
 
+  const tree = repo ? new Set(await repoTree(repo)) : null;
   const components: RawComponent[] = collapsed.map(({ item: indexItem, variants }) => {
     const item = { ...indexItem, ...enriched.get(indexItem.name) };
     const files = filesOf(item, repo);
@@ -299,7 +331,7 @@ export async function extractRegistry(
       registryDependencies: item.registryDependencies ?? [],
       installCommand,
       docsUrl: docsUrl ?? registry.homepage ?? undefined,
-      sourceUrl: repo && files[0] ? `https://github.com/${repo.owner}/${repo.repo}/blob/${repo.branch}/${files[0].path}` : undefined,
+      sourceUrl: repo && files[0] ? sourceUrlOf(repo, tree, files[0].path, indexItem.name) : undefined,
       itemUrl,
       files,
       example: example
@@ -348,9 +380,6 @@ async function registryStyles(registry: Registry, template: string): Promise<str
   return css.join("\n") || undefined;
 }
 
-const ACRONYMS = new Set(["ai", "ui", "cta", "faq", "otp", "kpi", "svg", "css", "url", "api", "pdf", "qr", "os"]);
-
-/** "text-reveal-card" → "Text Reveal Card"; leaves already-human titles alone. */
 /**
  * A usage example from an item's docs, for registries that have no separate example items but put one in the
  * item's notes (VantaUI): the first TSX or JSX code block that default-exports a page. Without it, a component that
@@ -365,6 +394,9 @@ function docsExample(item: RegistryItem): RawComponent["example"] {
   return undefined;
 }
 
+const ACRONYMS = new Set(["ai", "ui", "cta", "faq", "otp", "kpi", "svg", "css", "url", "api", "pdf", "qr", "os"]);
+
+/** "text-reveal-card" → "Text Reveal Card"; leaves already-human titles alone. */
 export function humanize(s: string): string {
   if (/\s/.test(s) || /^[A-Z][a-z]+[A-Z]/.test(s)) return s.replace(/([a-z])([A-Z])/g, "$1 $2");
   return s

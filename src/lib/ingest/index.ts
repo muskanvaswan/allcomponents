@@ -52,14 +52,16 @@ async function siteNameFor(url: string, landingHtml: string): Promise<string | u
   const own = metaContent(landingHtml, "property", "og:site_name") ?? metaContent(landingHtml, "name", "application-name");
   if (own) return own.trim();
   const origin = new URL(url).origin;
-  if (normalizeUrl(origin) === normalizeUrl(url)) return undefined;
-  try {
-    const home = await fetchText(origin, { timeoutMs: 10_000, retries: 0 });
-    const name = metaContent(home.text, "property", "og:site_name") ?? home.text.match(/<title[^>]*>([^<|–—·]{2,24})<\/title>/i)?.[1];
-    return name?.trim();
-  } catch {
-    return undefined;
+  let home = landingHtml;
+  if (normalizeUrl(origin) !== normalizeUrl(url)) {
+    try {
+      home = (await fetchText(origin, { timeoutMs: 10_000, retries: 0 })).text;
+    } catch {
+      return undefined;
+    }
   }
+  const name = metaContent(home, "property", "og:site_name") ?? home.match(/<title[^>]*>([^<|–—·]{2,24})<\/title>/i)?.[1];
+  return name?.trim();
 }
 
 export function normalizeSubmittedUrl(input: string): string {

@@ -1,16 +1,31 @@
 import "server-only";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import type * as esbuild from "esbuild";
-import { getAsset, saveAsset } from "./db";
+import * as esbuild from "esbuild";
+import { getAsset, saveAsset, READ_ONLY } from "./db";
 import { fetchText } from "./ingest/fetch";
 
 // Resolves a preview's npm imports so esbuild can bundle them into the preview
-// itself: React comes from this app's own node_modules (one copy shared by the
-// component and every package), everything else is fetched once from esm.sh as
-// ES modules and kept in SQLite, so rebuilding a preview needs no network.
+// itself: React comes from one script every preview shares (sharedReactRuntime),
+// built from this app's own node_modules, and everything else is fetched once
+// from esm.sh as ES modules and kept in SQLite, so rebuilding a preview needs no
+// network.
 
 export const isReactSpec = (spec: string) => /^react(-dom)?(\/.*)?$/.test(spec);
+
+/**
+ * The React module an esm.sh URL names (`/react@19.3.1/es2022/jsx-runtime.mjs` is "react/jsx-runtime"). A package
+ * loaded from its plain build because it doesn't declare React (ce-la-react, under media-chrome's React wrapper)
+ * still imports it, and must get this app's copy rather than a second React whose hooks have no renderer.
+ */
+function esmReactSpec(url: string): string | null {
+  const m = url.match(/^https:\/\/esm\.sh\/(react|react-dom)(?:@[^/?]+)?(\/[^?]*)?(?:\?|$)/);
+  if (!m) return null;
+  const rest = (m[2] ?? "").replace(/^\/es20\d\d\//, "/").replace(/\.(development\.)?mjs$/, "");
+  return m[1] + (rest === `/${m[1]}` ? "" : rest);
+}
 
 const appRequire = createRequire(path.join(process.cwd(), "package.json"));
 
@@ -25,6 +40,71 @@ const resolveReact = (spec: string) => {
   const file = spec === "react-dom/server" ? "server.browser" : rest.join("/") || "index";
   return path.join(path.dirname(appRequire.resolve(`${pkg}/package.json`)), `${file}.js`);
 };
+
+/**
+ * The React modules every preview loads from one shared script instead of bundling a copy each. React was about
+ * 60 KB of each compressed preview, the bulk of the snapshot, which outgrew GitHub's 100 MB file limit with it.
+ */
+const SHARED_REACT = new Set(["react", "react/jsx-runtime", "react/jsx-dev-runtime", "react/compiler-runtime", "react-dom", "react-dom/client"]);
+const SHARED_GLOBAL = "__lookbookReact";
+
+/** Where an import of React resolves: the shared script's copy, or the file on disk for a part it doesn't carry. */
+export function resolveReactSpec(spec: string): esbuild.OnResolveResult {
+  return SHARED_REACT.has(spec) ? { path: spec, namespace: "shared-react" } : { path: resolveReact(spec), namespace: "file" };
+}
+
+const RUNTIME_DIR = path.join(process.cwd(), "public", "preview-runtime");
+const runtimeCode = new Map<string, string | null>();
+
+/**
+ * A stored preview with the shared React script's code in place of its link, as it's served. Every request a
+ * sandboxed preview makes counts as third-party, and content blockers (the Claude app's own browser among them)
+ * refuse third-party scripts, so the page carries React itself as previews always did: only the stored copies,
+ * and so the snapshot, share one.
+ */
+export function withSharedReact(html: string): string {
+  return html.replace(/<script src="\/preview-runtime\/([\w.-]+\.js)"><\/script>/, (tag, name: string) => {
+    let code = runtimeCode.get(name);
+    if (code === undefined) {
+      code = existsSync(path.join(RUNTIME_DIR, name)) ? readFileSync(path.join(RUNTIME_DIR, name), "utf8") : null;
+      runtimeCode.set(name, code);
+    }
+    return code == null ? tag : `<script>${code.replace(/<\/script/gi, "<\\/script")}</script>`;
+  });
+}
+
+let runtime: Promise<string> | null = null;
+
+/**
+ * The shared React script's path on the site. It's built once from this app's copy of React and kept in
+ * public/preview-runtime/ (committed, so production has it) under a name that changes with its content, so a
+ * preview built against one copy never gets another.
+ */
+export function sharedReactRuntime(): Promise<string> {
+  runtime ??= (async () => {
+    const modules = [...SHARED_REACT].map((s) => `${JSON.stringify(s)}: require(${JSON.stringify(resolveReact(s))})`);
+    const out = await esbuild.build({
+      stdin: { contents: `globalThis.${SHARED_GLOBAL} = {\n${modules.join(",\n")}\n};`, resolveDir: process.cwd(), loader: "js" },
+      bundle: true,
+      write: false,
+      format: "iife",
+      platform: "browser",
+      target: "es2022",
+      minify: true,
+      logLevel: "silent",
+      define: { "process.env.NODE_ENV": '"production"' },
+    });
+    const code = out.outputFiles[0].text;
+    const { version } = appRequire("react/package.json") as { version: string };
+    const name = `react-${version}-${createHash("sha256").update(code).digest("hex").slice(0, 10)}.js`;
+    if (!READ_ONLY && !existsSync(path.join(RUNTIME_DIR, name))) {
+      mkdirSync(RUNTIME_DIR, { recursive: true });
+      writeFileSync(path.join(RUNTIME_DIR, name), code);
+    }
+    return `/preview-runtime/${name}`;
+  })();
+  return runtime;
+}
 
 const ESM = "https://esm.sh";
 
@@ -66,10 +146,25 @@ export function npmPlugin(): esbuild.Plugin {
   return {
     name: "npm",
     setup(build) {
+      // A part of React the shared script doesn't carry (react-dom/server) is bundled from disk, and uses its React.
+      build.onResolve({ filter: /^react(-dom)?(\/.*)?$/, namespace: "file" }, (args) => (SHARED_REACT.has(args.path) ? resolveReactSpec(args.path) : undefined));
+      build.onLoad({ filter: /.*/, namespace: "shared-react" }, (args) => ({
+        contents: `module.exports = globalThis.${SHARED_GLOBAL}[${JSON.stringify(args.path)}];`,
+        loader: "js",
+      }));
       build.onResolve({ filter: /.*/, namespace: "esm" }, (args) => {
-        if (isReactSpec(args.path)) return { path: resolveReact(args.path), namespace: "file" };
-        if (/^https?:\/\//.test(args.path)) return { path: args.path, namespace: "esm" };
-        if (args.path.startsWith("/") || args.path.startsWith(".")) return { path: new URL(args.path, args.importer).href, namespace: "esm" };
+        if (isReactSpec(args.path)) return resolveReactSpec(args.path);
+        // A whole lucide-react loaded in place of a subset (below) still imports its parts by esm.sh paths.
+        const url = /^https?:\/\//.test(args.path)
+          ? args.path
+          : args.path.startsWith("/") || args.path.startsWith(".")
+            ? new URL(args.path, /^https?:\/\//.test(args.importer) ? args.importer : `${ESM}/`).href
+            : null;
+        if (url) {
+          const react = esmReactSpec(url);
+          if (react && isReactSpec(react)) return resolveReactSpec(react);
+          return { path: url, namespace: "esm" };
+        }
         return { path: esmUrl(args.path), namespace: "esm" };
       });
       build.onLoad({ filter: /.*/, namespace: "esm" }, async (args) => {
@@ -152,7 +247,8 @@ function namedImports(code: string, spec: string): string[] | null {
 // component that imports three icons gets just those three files.
 async function lucideSubset(range: string, names: string[]): Promise<string | null> {
   const base = `https://cdn.jsdelivr.net/npm/lucide-react@${range}/dist/esm`;
-  const index = await esmModule(`${base}/lucide-react.mjs`);
+  // Releases before about 0.545 name their index lucide-react.js; without it every icon would be bundled.
+  const index = (await esmModule(`${base}/lucide-react.mjs`).catch(() => null)) ?? (await esmModule(`${base}/lucide-react.js`));
   const files = new Map<string, string>();
   for (const m of index.matchAll(/export\s*\{([^}]+)\}\s*from\s*['"]\.\/(icons\/[^'"]+)['"]/g)) {
     for (const part of m[1].split(",")) {
@@ -171,7 +267,7 @@ async function lucideSubset(range: string, names: string[]): Promise<string | nu
 
 /** Where a bare import from the component's own code should come from. */
 export function resolveBare(spec: string, versions: Map<string, string>, importerCode?: string): esbuild.OnResolveResult {
-  if (isReactSpec(spec)) return { path: resolveReact(spec), namespace: "file" };
+  if (isReactSpec(spec)) return resolveReactSpec(spec);
   const parts = spec.split("/");
   const pkg = spec.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
   const range = versions.get(pkg) || undefined;
@@ -181,5 +277,16 @@ export function resolveBare(spec: string, versions: Map<string, string>, importe
   if (names && names.every((n) => /^[A-Z][A-Za-z]+$/.test(n))) {
     return { path: `radix:${names.sort().join(",")}`, namespace: "esm" };
   }
+  // faker's main entry carries every locale (about 4 MB, so each of Kibo UI's demos that make sample data was near
+  // 1 MB compressed). A demo that only wants `faker` gets the English one, which exports the same object.
+  if (spec === "@faker-js/faker" && importerCode && namedImports(importerCode, spec)?.join() === "faker") {
+    return { path: esmUrl("@faker-js/faker/locale/en", range), namespace: "esm" };
+  }
+  // Some icon sets come from esm.sh as one module per icon (@tabler/icons-react 3.31, which shadcn/ui pins: about
+  // 5,000 requests for one preview). Asked for just the icons used, esm.sh sends one module instead.
+  const icons = ICON_SETS.test(spec) && importerCode ? namedImports(importerCode, spec) : null;
+  if (icons?.length) return { path: `${esmUrl(spec, range)}&exports=${icons.sort().join(",")}`, namespace: "esm" };
   return { path: esmUrl(spec, range), namespace: "esm" };
 }
+
+const ICON_SETS = /^(@tabler\/icons-react|@phosphor-icons\/react|@radix-ui\/react-icons|@remixicon\/react|@hugeicons\/core-free-icons|@heroicons\/react\/.+|react-icons\/\w+)$/;

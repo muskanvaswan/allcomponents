@@ -3,6 +3,7 @@ import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { connection, type NextRequest } from "next/server";
 import { getComponent, getLibrary, READ_ONLY } from "@/lib/db";
 import { previewFor } from "@/lib/preview";
+import { withSharedReact } from "@/lib/vendor";
 
 // The preview document runs third-party code. The CSP sandbox gives it an
 // opaque origin even if it's opened directly, so it can't reach this app's
@@ -50,7 +51,8 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/preview/[...id]"
 
   // Rebuilding is for working on previews locally; a public read-only site never does it on request.
   const rebuild = !READ_ONLY && req.nextUrl.searchParams.get("rebuild") === "1";
-  const result = await previewFor(c, lib, { rebuild });
+  const built = await previewFor(c, lib, { rebuild });
+  const result = { ...built, html: withSharedReact(built.html) };
   const accepts = req.headers.get("accept-encoding") ?? "";
   const encoding: Encoding | null = /\bbr\b/.test(accepts) ? "br" : /\bgzip\b/.test(accepts) ? "gzip" : null;
   const hash = createHash("sha1").update(result.html).digest("base64url").slice(0, 22);

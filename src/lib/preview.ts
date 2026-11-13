@@ -2,24 +2,24 @@ import "server-only";
 import path from "node:path/posix";
 import * as esbuild from "esbuild";
 import { getAsset, getPreview, libraryDependencies, READ_ONLY, savePreview } from "./db";
-import { fetchJson } from "./ingest/fetch";
+import { fetchJson, mapLimit } from "./ingest/fetch";
 import { rawGithubUrl } from "./ingest/links";
 import type { RegistryItem } from "./ingest/shadcn";
 import { SCROLLBAR_SCRIPT } from "./scrollbars";
-import { fetchRaw, loadSource, registryLookup, repoTree } from "./source";
+import { fetchRaw, loadSource, registryLookup, repoDependencyVersions, repoTree } from "./source";
 import { compileTailwind } from "./tailwind";
-import { npmPlugin, resolveBare } from "./vendor";
+import { npmPlugin, resolveBare, sharedReactRuntime } from "./vendor";
 import type { Component, ComponentStyles, Library } from "./types";
 
 // Live previews: the component (and its demo, when the library ships one) is
 // bundled on the server with esbuild from a virtual file system, and its
 // Tailwind CSS is compiled on the server from the classes it uses. npm imports
-// are bundled in too (React from this app, other packages from esm.sh, see
-// vendor.ts), so a preview is one self-contained HTML document with a single
-// inline script and stylesheet. It's served from /preview/* and shown in a
+// are bundled in too (packages from esm.sh, see vendor.ts), so a preview is one
+// HTML document with a single inline script and stylesheet, plus the React
+// script every preview shares. It's served from /preview/* and shown in a
 // sandboxed iframe, so third-party code never runs with this app's origin.
 
-const VERSION = "preview:v23";
+const VERSION = "preview:v24";
 const SHADCN_BASE = "https://ui.shadcn.com/r/styles/new-york-v4";
 const EXTS = ["", ".tsx", ".ts", ".jsx", ".js", "/index.tsx", "/index.ts", "/index.jsx", "/index.js"];
 
@@ -77,12 +77,17 @@ class SourceGraph {
     }
   }
 
-  addItem(item: RegistryItem, namePrefix = "") {
+  /** Adds an item's files and returns the paths they're stored under. */
+  addItem(item: RegistryItem, namePrefix = ""): string[] {
+    const stored: string[] = [];
     for (const f of item.files ?? []) {
       if (typeof f === "string" || !f.content) continue;
-      this.add(f.path, f.content, [f.target, namePrefix && `${namePrefix}/${item.name}`]);
+      // Every Kibo UI item is a file named `index.tsx`, so a second item's file goes under its install path instead.
+      const taken = this.files.has(clean(f.path)) && this.files.get(clean(f.path)) !== f.content;
+      stored.push(this.add(taken ? (f.target ?? `${item.name}/${f.path}`) : f.path, f.content, [f.target, namePrefix && `${namePrefix}/${item.name}`]));
     }
     this.addDeps(item.dependencies);
+    return stored;
   }
 
   /** Where the component's own registry serves the item `name`, if the component came from a registry. */
@@ -91,12 +96,21 @@ class SourceGraph {
     return this.itemUrl.replace(/[^/]+?(\.json)?$/, (m) => name + (m.endsWith(".json") ? ".json" : ""));
   }
 
-  /** The first candidate path that exists in the library's GitHub repo, fetched and added. */
-  private async fromRepo(candidates: string[]): Promise<string | null> {
+  /**
+   * The first candidate path that exists in the library's GitHub repo, fetched and added. With `inApp`, a candidate
+   * may also sit inside one app folder of a monorepo, since a registry's paths are relative to the site's app (Cult
+   * UI's `registry/` and `components/` are in `apps/www/`).
+   */
+  private async fromRepo(candidates: string[], inApp = false): Promise<string | null> {
     const repo = this.library.repo;
     if (!repo) return null;
-    const tree = new Set(await repoTree(repo));
-    const hit = candidates.map(clean).find((c) => tree.has(c));
+    const files = await repoTree(repo);
+    const tree = new Set(files);
+    const nested = (c: string) => {
+      const found = files.filter((f) => f.endsWith(`/${c}`) && /^(?:[^/]+\/){1,2}$/.test(f.slice(0, -c.length)));
+      return found.length === 1 ? found[0] : undefined;
+    };
+    const hit = candidates.map(clean).find((c) => tree.has(c)) ?? (inApp ? candidates.map(clean).map(nested).find(Boolean) : undefined);
     const content = hit ? await fetchRaw(rawGithubUrl(repo, hit)) : null;
     return hit && content != null ? this.add(hit, content) : null;
   }
@@ -122,8 +136,9 @@ class SourceGraph {
       if (app) bases.push(`${app}/${rest}`, `${app}/src/${rest}`);
     }
     const candidates = bases.flatMap((b) => EXTS.map((e) => b + e));
+    // A module never imports itself: Kibo UI's `table` is filed where shadcn/ui's table goes, and imports that.
     const found = this.lookup(candidates);
-    if (found) return found;
+    if (found && found !== importer) return found;
 
     // A demo from inside a monorepo app imports that app's own copies of the components, which can differ from the
     // registry's (shadcn/ui's per-style bases), so those come from the repo before any same-named file here.
@@ -133,21 +148,26 @@ class SourceGraph {
     }
 
     const last = norm(stripExt(spec.split("/").pop()!));
-    if (last !== "index" && this.byBase.has(last)) return this.byBase.get(last)!;
+    const named = last !== "index" ? this.byBase.get(last) : undefined;
+    if (named && named !== importer) return named;
 
     // Another item from the component's own registry, named by the import's last segment: Magic UI's
     // `@/registry/magicui/tweet-card`, or Board UI's `@/components/base/input/input` and `@/utils/cx`. It comes
-    // before the repo, whose copy can be ahead of or behind what the registry publishes.
+    // before the repo, whose copy can be ahead of or behind what the registry publishes, unless it lacks what the
+    // code imports (Cult UI's own `popover` isn't the shadcn/ui Popover its demos import).
     const sibling = /^(@|~)\//.test(spec) ? this.ownItemUrl(spec.split("/").pop()!) : null;
     if (sibling) {
       const item = await fetchJson<RegistryItem>(sibling);
       const first = item?.files?.find((f) => typeof f === "object" && f.content);
-      if (item && first && typeof first === "object") {
-        this.addItem(item);
+      const wanted = importedNames([importer ? (this.files.get(importer) ?? "") : ""], spec.split("/").pop()!);
+      if (item && first && typeof first === "object" && provides(item, wanted)) {
+        const stored = this.addItem(item);
         // The item may hold several files (Board UI's `input` has hint-text, label and input); the one the import names, if it's there.
-        const target = this.lookup(candidates) ?? clean(first.path);
-        this.aliases.set(stripExt(clean(spec.replace(/^(@|~)\//, ""))), target);
-        return target;
+        const target = [this.lookup(candidates), ...stored].find((p) => p && p !== importer);
+        if (target) {
+          this.aliases.set(stripExt(clean(spec.replace(/^(@|~)\//, ""))), target);
+          return target;
+        }
       }
     }
 
@@ -167,8 +187,28 @@ class SourceGraph {
         return clean(p);
       }
     }
-    return null;
+
+    // Last, the site's own files in a monorepo app: Cult UI's demos import `../ui/gradient-heading` and
+    // `@/components/fade-in`, which live under apps/www/.
+    return this.fromRepo(candidates, true);
   }
+}
+
+/** The names the code imports from a module whose path ends in `/<name>`, as `Popover` from `@/components/ui/popover`. */
+function importedNames(sources: string[], name: string): string[] {
+  const re = new RegExp(String.raw`import\s*(?:type\s+)?\{([^}]*)\}\s*from\s*["'][^"']*\/${name}["']`, "g");
+  return sources.flatMap((s) =>
+    [...s.matchAll(re)].flatMap((m) => m[1].split(",").map((p) => p.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]).filter(Boolean)),
+  );
+}
+
+/** Whether an item's code exports all of `names`. One that re-exports another module's (`export *`) gets the benefit of the doubt. */
+function provides(item: RegistryItem, names: string[]): boolean {
+  const code = (item.files ?? []).map((f) => (typeof f === "object" ? (f.content ?? "") : "")).join("\n");
+  if (/export\s*\*/.test(code)) return true;
+  return names.every((n) =>
+    new RegExp(String.raw`export\s+(?:default\s+)?(?:async\s+)?(?:const|let|var|function\*?|class|type|interface|enum)\s+${n}\b|export\s*(?:type\s*)?\{[^}]*\b${n}\b`).test(code),
+  );
 }
 
 /** Translates registry `cssVars` / `css` / `tailwind` fields into Tailwind v4 CSS. */
@@ -318,7 +358,12 @@ else {
 // page can put frames in its server HTML, and a theme switch reloads nothing.
 const THEME_BRIDGE = `(function(){var q=new URLSearchParams(location.search),d=document.documentElement;function set(t){d.classList.toggle("dark",t==="dark")}if(q.get("frame")==="tile")d.dataset.frame="tile";var forced=q.get("theme");if(forced)return set(forced);set(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");if(parent===window)return;addEventListener("message",function(e){if(e.source===parent&&e.data&&e.data.source==="lookbook"&&e.data.theme)set(e.data.theme)});try{parent.postMessage({source:"ui-agg-preview",want:"theme"},"*")}catch(x){}})();`;
 
-function documentHtml(parts: { head?: string; css?: string; body: string; script?: string }) {
+// A sandboxed preview has no storage of its own, and reading localStorage there throws, which crashed demos that
+// remember a setting (Cult UI's intro disclosure). They get a store that lasts as long as the page instead.
+const STORAGE_SHIM = `["localStorage","sessionStorage"].forEach(function(k){try{window[k]}catch(x){var m=new Map();Object.defineProperty(window,k,{configurable:true,value:{getItem:function(i){return m.has(i)?m.get(i):null},setItem:function(i,v){m.set(i,String(v))},removeItem:function(i){m.delete(i)},clear:function(){m.clear()},key:function(n){return Array.from(m.keys())[n]||null},get length(){return m.size}}})}});`;
+
+/** A preview page. `runtime` is the shared React script, loaded (and run) before the preview's own module. */
+function documentHtml(parts: { head?: string; css?: string; body: string; script?: string; runtime?: string }) {
   const esc = (s: string) => s.replace(/<\/script/gi, "<\\/script");
   return `<!doctype html>
 <!-- ${VERSION} -->
@@ -326,7 +371,7 @@ function documentHtml(parts: { head?: string; css?: string; body: string; script
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>${THEME_BRIDGE}${SCROLLBAR_SCRIPT}</script>
+<script>${STORAGE_SHIM}${THEME_BRIDGE}${SCROLLBAR_SCRIPT}</script>
 <style>
 #root { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 32px; box-sizing: border-box; }
 /* Grid tiles don't take pointer input, so a scrollbar there can't be used. Anything taller than the tile is cropped instead. */
@@ -343,10 +388,13 @@ html[data-frame="tile"] { overflow: hidden; }
    centred layout, leaving a chart sized "100% wide" with nothing to fill. It gets a comfortable width instead.
    It's in the base layer, so a width the demo does set (a Tailwind utility) still wins. */
 @layer base { #root > [data-slot="card"] { width: min(100%, 36rem); } }
-/* A demo that's a whole page (a <main>, or anything as tall or wide as the screen) fills the frame, rather than
-   shrinking to its content in the centred, padded layout other demos get. */
-#root:has(> :is(main, .h-screen, .min-h-screen, .h-dvh, .min-h-dvh, .w-screen)) { padding: 0; align-items: stretch; }
-#root > :is(main, .h-screen, .min-h-screen, .h-dvh, .min-h-dvh, .w-screen) { flex: 1 1 auto; width: 100%; }
+/* A demo that's a whole page (a <main>, or anything as tall or wide as the screen, or one sized to fill whatever
+   holds it) fills the frame, rather than shrinking to its content in the centred, padded layout other demos get.
+   It's a grid row at least the screen's height, so the page has a definite height for parts sized as a share of it
+   (uselayouts' "h-full" grids and carousels, which collapsed to nothing in a flex row), and a longer page still
+   grows the row. */
+#root:has(> :is(main, .h-screen, .min-h-screen, .h-dvh, .min-h-dvh, .w-screen, .h-full)) { padding: 0; display: grid; grid-template-rows: minmax(100vh, auto); grid-template-columns: minmax(0, 1fr); }
+#root > :is(main, .h-screen, .min-h-screen, .h-dvh, .min-h-dvh, .w-screen, .h-full) { width: 100%; }
 .__preview-error { font: 14px/1.5 system-ui, sans-serif; color: #737373; text-align: center; max-width: 320px; }
 ${parts.css ?? ""}
 </style>
@@ -354,6 +402,7 @@ ${parts.head ?? ""}
 </head>
 <body>
 <div id="root">${parts.body}</div>
+${parts.runtime ? `<script src="${parts.runtime}"></script>` : ""}
 ${parts.script ? `<script type="module">${esc(parts.script)}</script>` : ""}
 </body>
 </html>`;
@@ -465,15 +514,23 @@ function shippedAssets(c: Component, assets: Awaited<ReturnType<typeof repoAsset
 async function repoAssets(library: Library) {
   const repo = library.repo;
   const files = new Set(repo ? await repoTree(repo) : []);
+  // The site's public folder: `public/` at the root, or in a monorepo its app's own (Cult UI's apps/www/public/).
+  const roots = new Set<string>();
   const publicDirs = new Set<string>();
   for (const f of files) {
-    if (!f.startsWith("public/")) continue;
+    const root = f.match(/^((?:[^/]+\/){0,2})public\//)?.[1];
+    if (root === undefined) continue;
+    roots.add(root);
     const parts = f.split("/");
-    for (let i = 2; i < parts.length; i++) publicDirs.add(parts.slice(0, i).join("/"));
+    for (let i = root.split("/").length + 1; i < parts.length; i++) publicDirs.add(parts.slice(0, i).join("/"));
   }
+  const ordered = [...roots].sort((a, b) => a.length - b.length);
   const publicUrl = (p: string) => {
-    const candidate = `public${p.replace(/[?#].*$/, "")}`;
-    return repo && (files.has(candidate) || publicDirs.has(candidate)) ? rawGithubUrl(repo, candidate) : null;
+    for (const root of ordered) {
+      const candidate = `${root}public${p.replace(/[?#].*$/, "")}`;
+      if (repo && (files.has(candidate) || publicDirs.has(candidate))) return rawGithubUrl(repo, candidate);
+    }
+    return null;
   };
   return {
     /** Where a stylesheet's `url(...)` should point. SVG filter fragments, data URIs and absolute URLs stay as written. */
@@ -485,11 +542,19 @@ async function repoAssets(library: Library) {
     },
     /** Rewrites root-relative string literals that name a file or folder in `public/`. */
     inCode(code: string): string {
-      if (!publicDirs.size) return code;
-      return code.replace(/(["'`])(\/[\w.-]+(?:\/[\w.-]+)*)\1/g, (m, quote: string, p: string) => {
-        const url = publicUrl(p);
-        return url ? `${quote}${url}${quote}` : m;
-      });
+      if (!roots.size) return code;
+      return (
+        code
+          .replace(/(["'`])(\/[\w.-]+(?:\/[\w.-]+)*)\1/g, (m, quote: string, p: string) => {
+            const url = publicUrl(p);
+            return url ? `${quote}${url}${quote}` : m;
+          })
+          // A path built in a template (Cult UI's `/images/gibli/gibli-${i + 1}.jpg`) gets its folder pointed there.
+          .replace(/`(\/(?:[\w.-]+\/)+)/g, (m, dir: string) => {
+            const url = publicUrl(dir.slice(0, -1));
+            return url ? `\`${url}/` : m;
+          })
+      );
     },
   };
 }
@@ -499,6 +564,9 @@ async function bundleReact(c: Component, library: Library): Promise<PreviewResul
   const graph = new SourceGraph(library);
   graph.itemUrl = c.itemUrl;
   graph.addDeps(c.dependencies);
+  // A package declared without a version gets the one the library's repo pins, rather than whatever is newest:
+  // Kibo UI's table names @tanstack/react-table bare, and its package.json has ^8.
+  if (library.repo) graph.addDeps(await repoDependencyVersions(library.repo));
   // A package the component imports without declaring it gets the version its library uses elsewhere
   // (Board UI's app-shell imports @tanstack/react-table, which its data-table pins to ^8).
   graph.addDeps(libraryDependencies(library.id));
@@ -512,15 +580,27 @@ async function bundleReact(c: Component, library: Library): Promise<PreviewResul
     if (f.content) graph.add(f.path, f.content, f === own ? [f.target, `components/${c.librarySlug}/${c.slug}`, `components/ui/${c.slug}`] : [f.target]);
   }
 
-  // Registry dependencies: a full item URL, `@magicui/marquee`, or a bare name, which means the library's own
-  // item when its registry has one (Board UI's `button`, `cx`) and otherwise a shadcn/ui primitive.
-  await Promise.all(
-    c.registryDependencies.slice(0, 12).map(async (dep) => {
+  // Registry dependencies: a full item URL, `@magicui/marquee`, or a bare name. To the shadcn CLI a bare name is a
+  // shadcn/ui primitive, but some libraries name their own items that way (Board UI's `button`, `cx`), so the
+  // library's own item is used when its registry has one, unless it lacks what the code imports from it (Cult UI's
+  // own `popover` is an animated form, not shadcn/ui's Popover). They're all fetched before bundling, so the files
+  // they publish are in place first: Board UI's app shell names 55, and a file only the 50th carries (its current
+  // menu-styles.ts) would otherwise come from the repo, which is out of step.
+  const importing = [...graph.files.values(), ...(c.example?.files ?? []).map((f) => f.content ?? "")];
+  await mapLimit(
+    c.registryDependencies.slice(0, 80),
+    8,
+    async (dep) => {
       const name = dep.replace(/\.json$/, "").split("/").pop()!;
+      const bare = !dep.startsWith("@") && !/^https?:/.test(dep);
       const own = /^https?:/.test(dep) ? dep : graph.ownItemUrl(name);
-      const item = (own ? await fetchJson<RegistryItem>(own) : null) ?? (dep.startsWith("@") || /^https?:/.test(dep) ? null : await fetchJson<RegistryItem>(`${SHADCN_BASE}/${name}.json`));
+      const ownItem = own ? await fetchJson<RegistryItem>(own) : null;
+      const item =
+        ownItem && (!bare || provides(ownItem, importedNames(importing, name)))
+          ? ownItem
+          : ((bare ? await fetchJson<RegistryItem>(`${SHADCN_BASE}/${name}.json`) : null) ?? ownItem);
       if (item) graph.addItem(item, "components");
-    }),
+    },
   );
 
   // A block that ships its own page (shadcn's registry:page) is previewed as that page: the page sets up what its
@@ -531,6 +611,9 @@ async function bundleReact(c: Component, library: Library): Promise<PreviewResul
     mainFiles.find((f) => f.type !== "registry:lib" && /\.(tsx|jsx|js)$/.test(f.path) && !/lib\/utils/.test(f.path)) ??
     mainFiles.find((f) => /\.(tsx|jsx|js)$/.test(f.path))!;
   let exampleFile = page ? undefined : c.example?.files?.find((f) => f.content && /\.(tsx|jsx|js)$/.test(f.path));
+  // A demo that only frames a page of the library's own site (uselayouts' `<iframe src="/preview/…">`) would frame a
+  // page that doesn't exist here, so the component is shown instead.
+  if (exampleFile && /<iframe\b[^>]*\ssrc=["']\/(?!\/)/.test(exampleFile.content ?? "")) exampleFile = undefined;
   let exampleSource = exampleFile?.content;
   const lookup = exampleSource ? registryLookup(exampleSource) : null;
   if (lookup && exampleSource) {
@@ -570,6 +653,16 @@ async function bundleReact(c: Component, library: Library): Promise<PreviewResul
         if (/(^|\/)lib\/utils$/.test(spec) || spec === "@/lib/utils" || spec === "cn") {
           const own = await graph.resolve(spec, importer);
           return own ? { path: own, namespace: "v" } : { path: "shim:cn", namespace: "v" };
+        }
+        // Turborepo's workspace packages aren't on npm. Kibo UI's code imports shadcn/ui as
+        // `@repo/shadcn-ui/components/ui/radio-group`, and its demos import each component as `@repo/choicebox`, so
+        // they resolve like the library's own `@/` imports.
+        if (spec.startsWith("@repo/")) {
+          const local = `@/${spec.slice("@repo/".length).replace(/^shadcn-ui\//, "")}`;
+          const resolved = await graph.resolve(local, importer);
+          if (resolved) return { path: resolved, namespace: "v" };
+          missing.push(spec);
+          return { path: `missing:${spec}`, namespace: "v" };
         }
         const isBare = !/^(\.|\/|@\/|~\/|#\/|\$lib\/)/.test(spec);
         if (isBare) {
@@ -623,7 +716,8 @@ async function bundleReact(c: Component, library: Library): Promise<PreviewResul
       // PREVIEW_MINIFY=0 builds readable previews, for debugging one that crashes.
       minify: process.env.PREVIEW_MINIFY !== "0",
       absWorkingDir: process.cwd(),
-      define: { "process.env.NODE_ENV": '"production"' },
+      // Any other variable a demo reads is unset, as on a site without it (Kibo UI's ticker reads a logo API token).
+      define: { "process.env.NODE_ENV": '"production"', "process.env": "{}" },
       plugins: [plugin, npmPlugin()],
     });
     for (const f of out.outputFiles) {
@@ -649,6 +743,7 @@ async function bundleReact(c: Component, library: Library): Promise<PreviewResul
     head: cssLinks.map((href) => `<link rel="stylesheet" href="${href}">`).join("\n"),
     body: "",
     script: js,
+    runtime: await sharedReactRuntime(),
   });
   return { ok: true, html, error: missing.length ? `Unresolved imports: ${missing.join(", ")}` : undefined };
 }

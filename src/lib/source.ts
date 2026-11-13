@@ -27,8 +27,11 @@ export function repoTree(repo: RepoRef): Promise<string[]> {
   if (!p) {
     p = githubApi<{ tree?: { path: string; type: string }[] }>(`repos/${repo.owner}/${repo.repo}/git/trees/${repo.branch}?recursive=1`)
       .then((data) => (data.tree ?? []).filter((t) => t.type === "blob").map((t) => t.path))
-      .catch(() => {
+      .catch((e: Error) => {
         treeCache.delete(key);
+        // Without the list, previews lose the repo's files and images, so say so (usually the hourly API limit).
+        const limited = /HTTP (403|429)\b/.test(e.message) ? " Set GITHUB_TOKEN to raise GitHub's limit." : "";
+        console.warn(`No file list for ${key}: ${e.message}.${limited}`);
         return [];
       });
     treeCache.set(key, p);
@@ -43,6 +46,37 @@ export async function fetchRaw(url: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+const pinnedCache = new Map<string, Promise<string[]>>();
+
+/**
+ * The npm versions a library's repo names, from its package.json files (a monorepo such as Kibo UI has one per
+ * package), as `name@version`: the version a range starts from, which the repo was written against, rather than the
+ * newest the range allows (Kibo UI's demos break on faker releases after the ^10.3.0 it names). Workspace and
+ * catalog references are left out. Fetched once per repo per server lifetime.
+ */
+export function repoDependencyVersions(repo: RepoRef): Promise<string[]> {
+  const key = `${repo.owner}/${repo.repo}@${repo.branch}`;
+  let p = pinnedCache.get(key);
+  if (!p) {
+    p = (async () => {
+      const manifests = (await repoTree(repo)).filter((f) => /(^|\/)package\.json$/.test(f) && !/(^|\/)(node_modules|\.[^/]+)\//.test(f)).slice(0, 80);
+      const found = await mapLimit(manifests, 8, async (f) => {
+        try {
+          const pkg = JSON.parse((await fetchRaw(rawGithubUrl(repo, f))) ?? "{}") as Record<string, Record<string, unknown> | undefined>;
+          return Object.entries({ ...pkg.peerDependencies, ...pkg.devDependencies, ...pkg.dependencies })
+            .filter((e): e is [string, string] => typeof e[1] === "string" && /^[\^~]?\d/.test(e[1]))
+            .map(([name, range]) => `${name}@${range.replace(/^[\^~]/, "")}`);
+        } catch {
+          return [];
+        }
+      });
+      return found.flat();
+    })();
+    pinnedCache.set(key, p);
+  }
+  return p;
 }
 
 const itemFiles = (item: RegistryItem): ComponentFile[] =>
