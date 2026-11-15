@@ -36,6 +36,8 @@ Without MCP, the same answers are plain JSON:
 - [One component with its source](${origin}/r/magicui--marquee.json): \`GET /r/<library>--<component>.json\`, a shadcn registry item.
 - [Every component](${origin}/r/registry.json): \`GET /r/registry.json\`
 
+Requests are rate-limited per address. On HTTP 429, wait a minute before trying again rather than retrying at once.
+
 Each result has an \`id\`, \`name\`, \`library\`, \`category\`, \`description\`, \`dependencies\`, an \`install\` command (\`npx shadcn@latest add …\`), the \`registryItem\` URL holding its source, and \`preview\` and \`page\` links. Show a person the preview before choosing for them.
 
 ## Categories

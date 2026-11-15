@@ -11,7 +11,7 @@ The base URL is `https://allcomps.vercel.app`, unless the `ALLCOMPS_URL` environ
 
 ## The API
 
-Everything is plain HTTP; use `curl -s`.
+Everything is plain HTTP; use `curl -s`. Requests are rate-limited per address: on HTTP 429, wait a minute before trying again rather than retrying at once.
 
 - **Find components for a need:** `GET /api/alternatives?query=<need>&limit=6`
 
