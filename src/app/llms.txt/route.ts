@@ -1,11 +1,14 @@
 import { connection, type NextRequest } from "next/server";
 import { catalogue, originFrom } from "@/lib/agent";
-import { SITE_NAME, SKILL_INSTALL } from "@/lib/site";
+import { READ_ONLY } from "@/lib/db";
+import { SITE_NAME, SITE_URL, SKILL_INSTALL } from "@/lib/site";
 
 /** How an agent should use this aggregator, in the llms.txt convention: plain Markdown at a known address. */
 export async function GET(req: NextRequest) {
-  await connection();
-  const origin = originFrom(req.headers);
+  // The read-only site names its own address, so the file is built once per deploy; locally it names the address
+  // it was reached on.
+  if (!READ_ONLY) await connection();
+  const origin = READ_ONLY ? SITE_URL : originFrom(req.headers);
   const { categories, libraries } = catalogue();
   const total = libraries.reduce((n, l) => n + l.components, 0);
 
@@ -32,6 +35,8 @@ Without MCP, the same answers are plain JSON:
 - Both take \`category=<id>\`, \`library=<slug>[,<slug>]\` and \`limit=<1-24>\` (default 8).
 - [One component with its source](${origin}/r/magicui--marquee.json): \`GET /r/<library>--<component>.json\`, a shadcn registry item.
 - [Every component](${origin}/r/registry.json): \`GET /r/registry.json\`
+
+Requests are rate-limited per address. On HTTP 429, wait a minute before trying again rather than retrying at once.
 
 Each result has an \`id\`, \`name\`, \`library\`, \`category\`, \`description\`, \`dependencies\`, an \`install\` command (\`npx shadcn@latest add …\`), the \`registryItem\` URL holding its source, and \`preview\` and \`page\` links. Show a person the preview before choosing for them.
 
