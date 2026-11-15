@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cacheLife } from "next/cache";
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import { connection } from "next/server";
@@ -11,10 +12,11 @@ import { CopyButton } from "@/components/copy-button";
 import { LibraryMark } from "@/components/library-mark";
 import { PreviewPanel } from "@/components/preview-panel";
 import { Toolbar } from "@/components/toolbar";
+import { PAGE_SIZE } from "@/components/browse";
 import { getComponent, getLibrary, READ_ONLY } from "@/lib/db";
 import { highlight } from "@/lib/highlight";
 import { registryName } from "@/lib/registry";
-import { alternativesFor } from "@/lib/search";
+import { alternativesFor, searchComponents } from "@/lib/search";
 import { jsonLd, SITE_NAME, SITE_URL } from "@/lib/site";
 import { loadSource } from "@/lib/source";
 import { CATEGORIES, CATEGORY_BY_ID } from "@/lib/taxonomy";
@@ -24,6 +26,15 @@ function clip(text: string, max = 158) {
   if (text.length <= max) return text;
   const cut = text.lastIndexOf(" ", max - 1);
   return `${text.slice(0, cut > 0 ? cut : max - 1)}…`;
+}
+
+// The read-only site's data only changes with a deploy, so a component page is rendered once per deploy and then
+// served from the CDN. The build prerenders the ones the home page links to; every other one renders on its first
+// visit, is upgraded to a static page in the background, and is served from the cache after that. (Prerendering
+// all of them made the build about 9 minutes long and half a gigabyte, since each page carries its highlighted
+// source.) Working locally, the database is live, so the page reads it on each request instead.
+export function generateStaticParams() {
+  return searchComponents({ limit: PAGE_SIZE }).items.map((c) => ({ id: c.id.split("/") }));
 }
 
 export async function generateMetadata({ params }: PageProps<"/c/[...id]">): Promise<Metadata> {
@@ -52,27 +63,46 @@ export default function ComponentPage(props: PageProps<"/c/[...id]">) {
   );
 }
 
-async function ComponentDetail({ params }: Pick<PageProps<"/c/[...id]">, "params">) {
-  const { id } = await params;
-  // Reads a live database and highlights code at request time; never prerender this.
-  await connection();
-  const stored = getComponent(id.map(decodeURIComponent).join("/"));
+/** The component with its source, highlighted code and alternatives, or null when there's no such component. */
+async function componentView(id: string) {
+  const stored = getComponent(id);
   const library = stored && getLibrary(stored.libraryId);
-  if (!stored || !library) notFound();
-
+  if (!stored || !library) return null;
   const c = await loadSource(stored, library);
-  const category = CATEGORY_BY_ID.get(c.category);
-  const h = await headers();
-  const origin = `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host")}`;
-  const ourInstall = c.files.some((f) => f.content) ? `npx shadcn@latest add ${origin}/r/${registryName(c)}.json` : null;
-
   const codeFiles: CodeFile[] = await Promise.all(
     [
       ...c.files.filter((f) => f.content && f.type !== "registry:lib"),
       ...(c.example?.files ?? []).filter((f) => f.content).map((f) => ({ ...f, label: `Usage: ${f.path.split("/").pop()}` })),
     ].map(async (f) => ({ path: f.path, raw: f.content!, html: await highlight(f.content!, f.path), label: "label" in f ? (f.label as string) : undefined })),
   );
-  const alternatives = alternativesFor(c, 8);
+  return { c, library, codeFiles, alternatives: alternativesFor(c, 8) };
+}
+
+/** The same, cached for the life of a deploy, so the build can prerender it (highlighting is async work). */
+async function cachedComponentView(id: string) {
+  "use cache";
+  cacheLife("max");
+  return componentView(id);
+}
+
+/** The address this request came in on, so a local install command points at the local server. */
+async function requestOrigin() {
+  const h = await headers();
+  return `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host")}`;
+}
+
+async function ComponentDetail({ params }: Pick<PageProps<"/c/[...id]">, "params">) {
+  const { id } = await params;
+  if (!READ_ONLY) await connection();
+  const key = id.map(decodeURIComponent).join("/");
+  const view = READ_ONLY ? await cachedComponentView(key) : await componentView(key);
+  if (!view) notFound();
+  const { c, library, codeFiles, alternatives } = view;
+
+  const category = CATEGORY_BY_ID.get(c.category);
+  // The read-only site names its own address rather than reading the request's, which would make the page dynamic.
+  const origin = READ_ONLY ? SITE_URL : await requestOrigin();
+  const ourInstall = c.files.some((f) => f.content) ? `npx shadcn@latest add ${origin}/r/${registryName(c)}.json` : null;
 
   const url = `${SITE_URL}/c/${c.id}`;
   const structured = jsonLd({
@@ -91,7 +121,7 @@ async function ComponentDetail({ params }: Pick<PageProps<"/c/[...id]">, "params
         "@type": "BreadcrumbList",
         itemListElement: [
           { "@type": "ListItem", position: 1, name: "All Components", item: SITE_URL },
-          { "@type": "ListItem", position: 2, name: category?.label, item: `${SITE_URL}/?category=${c.category}` },
+          { "@type": "ListItem", position: 2, name: category?.label, item: `${SITE_URL}/browse?category=${c.category}` },
           { "@type": "ListItem", position: 3, name: c.name, item: url },
         ],
       },
@@ -106,7 +136,7 @@ async function ComponentDetail({ params }: Pick<PageProps<"/c/[...id]">, "params
           All Components
         </Link>
         <span className="mx-2" aria-hidden="true">/</span>
-        <Link href={`/?category=${c.category}`} className="hover:text-ink">
+        <Link href={`/browse?category=${c.category}`} className="hover:text-ink">
           {category?.label}
         </Link>
       </nav>
@@ -116,7 +146,7 @@ async function ComponentDetail({ params }: Pick<PageProps<"/c/[...id]">, "params
           <h1 className="font-display text-[34px] leading-tight font-light tracking-[-0.025em] sm:text-[44px]">{c.name}</h1>
           {c.description && <p className="mt-3 text-[15px] leading-relaxed text-muted">{c.description}</p>}
           <div className="mt-4 flex flex-wrap items-center gap-2 text-[13px]">
-            <Link href={`/?library=${c.librarySlug}`} className="rounded-full bg-fill px-3 py-1 font-medium transition-colors hover:bg-fill-strong">
+            <Link href={`/browse?library=${c.librarySlug}`} className="rounded-full bg-fill px-3 py-1 font-medium transition-colors hover:bg-fill-strong">
               <LibraryMark id={c.libraryId} name={c.libraryName} size="md" />
             </Link>
             {c.framework && <span className="rounded-full bg-fill px-3 py-1 text-muted">{c.framework === "react" ? "React" : c.framework}</span>}

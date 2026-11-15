@@ -1,11 +1,14 @@
 import { connection, type NextRequest } from "next/server";
 import { catalogue, originFrom } from "@/lib/agent";
-import { SITE_NAME, SKILL_INSTALL } from "@/lib/site";
+import { READ_ONLY } from "@/lib/db";
+import { SITE_NAME, SITE_URL, SKILL_INSTALL } from "@/lib/site";
 
 /** How an agent should use this aggregator, in the llms.txt convention: plain Markdown at a known address. */
 export async function GET(req: NextRequest) {
-  await connection();
-  const origin = originFrom(req.headers);
+  // The read-only site names its own address, so the file is built once per deploy; locally it names the address
+  // it was reached on.
+  if (!READ_ONLY) await connection();
+  const origin = READ_ONLY ? SITE_URL : originFrom(req.headers);
   const { categories, libraries } = catalogue();
   const total = libraries.reduce((n, l) => n + l.components, 0);
 

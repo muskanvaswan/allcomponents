@@ -14,6 +14,19 @@ const nextConfig: NextConfig = {
   headers() {
     return [{ source: "/preview-runtime/:file", headers: [{ key: "cache-control", value: "public, max-age=31536000, immutable" }] }];
   },
+  // The home page is fully static; its filtered, searched and paged views moved to /browse. Links in the old form
+  // (/?category=…, /?q=…, /?library=…, /?page=…) are sent there with their query, by Vercel's router rather than a
+  // function. (A rewrite would keep the old address, but the client router treats one path as one route and would
+  // keep showing the static page when a filter is clicked.)
+  redirects() {
+    return ["q", "category", "library", "page"].map((key) => ({ source: "/", has: [{ type: "query" as const, key }], destination: "/browse", permanent: false }));
+  },
+  // Next sends "HTML-limited" bots (Bingbot, Applebot, Twitterbot, Slackbot, Google's ad and preview fetchers…)
+  // past a prerendered page to a function, so they get the page's metadata in <head> rather than streamed in. The
+  // public pages here are prerendered with their metadata already in <head>, so that detour would only cost a
+  // function call per crawl. This matches no user agent. (The dynamic pages, /browse and /polishd, then stream
+  // metadata to those bots too; neither is meant to be indexed.)
+  htmlLimitedBots: /[^\s\S]/,
   turbopack: {
     rules: {
       "*.css": {

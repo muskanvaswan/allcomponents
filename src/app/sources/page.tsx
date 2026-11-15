@@ -46,7 +46,8 @@ export default function SourcesPage() {
 }
 
 async function Sources() {
-  await connection();
+  // Static on the read-only site, whose list only changes with a deploy; live while working locally.
+  if (!READ_ONLY) await connection();
   const libraries = listLibraries();
   const busy = libraries.some((l) => l.status === "pending" || l.status === "ingesting");
   return (
@@ -80,7 +81,7 @@ function SourceRow({ library: l }: { library: Library }) {
       <div className="min-w-0">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           {l.status === "ready" ? (
-            <Link href={`/?library=${l.slug}`} className="font-semibold hover:opacity-70">
+            <Link href={`/browse?library=${l.slug}`} className="font-semibold hover:opacity-70">
               <LibraryMark id={l.id} name={l.name} size="md" />
             </Link>
           ) : (

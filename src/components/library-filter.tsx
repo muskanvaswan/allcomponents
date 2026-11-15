@@ -41,7 +41,9 @@ export function LibraryFilter({ libraries, selected, base, footer }: { libraries
       setTicked(next);
       // Slugs are URL-safe, and a literal comma reads better than %2C.
       const slugs = libraries.filter((l) => next.includes(l.slug)).map((l) => l.slug);
-      const href = slugs.length ? `${base}${base.includes("?") ? "&" : "?"}library=${slugs.join(",")}` : base;
+      // With no other filter, `base` is the static home page; a filtered view lives at /browse.
+      const root = base === "/" ? "/browse" : base;
+      const href = slugs.length ? `${root}${root.includes("?") ? "&" : "?"}library=${slugs.join(",")}` : base;
       startNavigation(href);
       router.push(href);
     });

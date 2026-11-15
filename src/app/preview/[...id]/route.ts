@@ -19,9 +19,10 @@ const HEADERS = {
 
 // Browsers reuse a preview for a minute, then revalidate with its ETag (a 304
 // unless it was rebuilt), and may show the stale copy while they check. A
-// read-only snapshot only changes when it's redeployed, so a CDN may also keep
-// it for a day (Vercel's starts afresh with each deployment).
-const CACHE = READ_ONLY ? "public, max-age=60, s-maxage=86400, stale-while-revalidate=604800" : "public, max-age=60, stale-while-revalidate=86400";
+// read-only snapshot only changes when it's redeployed, and Vercel's CDN starts
+// afresh with each deployment, so the CDN keeps each preview for the life of the
+// deploy: only its first request runs this.
+const CACHE = READ_ONLY ? "public, max-age=60, s-maxage=31536000" : "public, max-age=60, stale-while-revalidate=86400";
 
 // A preview is a few hundred KB of minified script and CSS, and a grid page
 // loads dozens. Brotli at quality 6 sends under a third of it for ~10ms of work,

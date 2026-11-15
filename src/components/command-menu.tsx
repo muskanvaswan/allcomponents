@@ -66,7 +66,7 @@ export function CommandMenu({ categoryLabels }: { categoryLabels: Record<string,
   const options: Option[] =
     q && !nothing
       ? [
-          { id: `${listId}-all`, href: `/?q=${encodeURIComponent(q)}` },
+          { id: `${listId}-all`, href: `/browse?q=${encodeURIComponent(q)}` },
           ...(found?.items ?? []).map((c, i) => ({ id: `${listId}-${i}`, href: `/c/${c.id}`, component: c })),
         ]
       : [];

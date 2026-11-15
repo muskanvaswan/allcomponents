@@ -2,4 +2,10 @@
 // this file before regenerating it.
 import { initPolishd } from "@polishd/next/client";
 
-initPolishd();
+// Crawlers that run the page's scripts (Googlebot renders every page it reads)
+// aren't visitors: leave them out of the analytics, so they don't each post a
+// batch to /api/polishd, which runs a function per request.
+const CRAWLER = /bot\b|bot\/|crawl|spider|slurp|googleother|headless|lighthouse/i;
+const crawler = navigator.webdriver || CRAWLER.test(navigator.userAgent);
+
+initPolishd({ enabled: !crawler });

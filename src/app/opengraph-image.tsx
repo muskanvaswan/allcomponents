@@ -1,3 +1,4 @@
+import { cacheLife } from "next/cache";
 import { ImageResponse } from "next/og";
 import { AppMark } from "@/components/app-mark";
 import { libraryColorHex } from "@/components/library-mark";
@@ -38,6 +39,8 @@ const MAX_CHIPS = 6;
  */
 async function googleFont(family: string, text: string): Promise<string | null> {
   "use cache";
+  // For the life of the deploy: the default profile would re-render the image every 15 minutes.
+  cacheLife("max");
   try {
     const css = await (await fetch(`https://fonts.googleapis.com/css2?family=${family}&text=${encodeURIComponent(text)}`)).text();
     const url = css.match(/src: url\((.+?)\) format\('(?:opentype|truetype)'\)/)?.[1];
