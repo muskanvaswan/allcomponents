@@ -16,10 +16,11 @@ const nextConfig: NextConfig = {
   },
   // The home page is fully static; its filtered, searched and paged views moved to /browse. Links in the old form
   // (/?category=…, /?q=…, /?library=…, /?page=…) are sent there with their query, by Vercel's router rather than a
-  // function. (A rewrite would keep the old address, but the client router treats one path as one route and would
-  // keep showing the static page when a filter is clicked.)
+  // function, and permanently (308), so search engines drop the old addresses instead of rechecking them. (A rewrite
+  // would keep the old address, but the client router treats one path as one route and would keep showing the
+  // static page when a filter is clicked.)
   redirects() {
-    return ["q", "category", "library", "page"].map((key) => ({ source: "/", has: [{ type: "query" as const, key }], destination: "/browse", permanent: false }));
+    return ["q", "category", "library", "page"].map((key) => ({ source: "/", has: [{ type: "query" as const, key }], destination: "/browse", permanent: true }));
   },
   // Next sends "HTML-limited" bots (Bingbot, Applebot, Twitterbot, Slackbot, Google's ad and preview fetchers…)
   // past a prerendered page to a function, so they get the page's metadata in <head> rather than streamed in. The
